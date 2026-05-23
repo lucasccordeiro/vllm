@@ -77,6 +77,18 @@ TARGETS: list[Target] = [
         expected="FAILED",
         safety_expected=None,
     ),
+    Target(
+        name="get_num_blocks",
+        entry="get_num_blocks.py",
+        expected="SUCCESSFUL",
+        safety_expected="SUCCESSFUL",
+    ),
+    Target(
+        name="get_num_blocks_buggy",
+        entry="get_num_blocks_buggy.py",
+        expected="FAILED",
+        safety_expected=None,
+    ),
 ]
 
 
