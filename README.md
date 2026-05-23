@@ -7,9 +7,14 @@ integer / index arithmetic, modelled on the
 
 ## Status
 
-Session 1 (this commit): pipeline operational, one verification
-target (`cdiv`) shipped with buggy / non-buggy pair. End-to-end
-`make verify` completes in ~8 s.
+Three targets shipped — `cdiv`, `round_up`, `round_down` —
+each with a buggy / non-buggy pair. End-to-end `make verify`
+completes in ~24 s.
+
+No real upstream vLLM bug found yet; the FAILED verdicts so far
+are deliberately-weakened harnesses confirming the pipeline. The
+next target (`get_num_blocks`) is the first realistic bug-found
+candidate.
 
 See [`REPORT.md`](./REPORT.md) for the full scope, soundness
 caveats, and target roadmap.
@@ -32,13 +37,17 @@ Requires ESBMC ≥ 8.3.0 built with the Python frontend.
 
 ```
 harness/
-  stubs.py          # canonical stubs (concatenated in front of every entry)
-  cdiv.py           # target: vllm/utils/math_utils.py:10  (non-buggy)
-  cdiv_buggy.py     # target: same, precondition dropped   (buggy)
-verify.py           # manifest + two-phase driver
-Makefile            # make verify / phase1 / phase2 / verify-only
-REPORT.md           # session report
-build/              # generated artefacts (git-ignored)
+  stubs.py             # canonical stubs (concatenated in front of every entry)
+  cdiv.py              # vllm/utils/math_utils.py:10  (non-buggy)
+  cdiv_buggy.py        #   precondition dropped       (buggy)
+  round_up.py          # vllm/utils/math_utils.py:20  (non-buggy)
+  round_up_buggy.py    #   precondition dropped       (buggy)
+  round_down.py        # vllm/utils/math_utils.py:25  (non-buggy)
+  round_down_buggy.py  #   precondition dropped       (buggy)
+verify.py              # manifest + two-phase driver
+Makefile               # make verify / phase1 / phase2 / verify-only
+REPORT.md              # progress report
+build/                 # generated artefacts (git-ignored)
 ```
 
 ## Two-phase verification
