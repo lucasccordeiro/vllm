@@ -89,6 +89,15 @@ TARGETS: list[Target] = [
         expected="FAILED",
         safety_expected=None,
     ),
+    Target(
+        # First live-bug target: --block-size 0 CLI path.
+        # Phase 1 FAILED is the *expected and significant* verdict --
+        # the counterexample IS the bug report.
+        name="block_size_zero_cli_path",
+        entry="block_size_zero_cli_path.py",
+        expected="FAILED",
+        safety_expected=None,
+    ),
 ]
 
 

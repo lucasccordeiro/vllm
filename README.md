@@ -11,10 +11,13 @@ Four targets shipped — `cdiv`, `round_up`, `round_down`,
 `get_num_blocks` — each with a buggy / non-buggy pair. End-to-end
 `make verify` completes in ~32 s.
 
-First realistic upstream finding (latent precondition):
+First latent-precondition finding (defensive, not a live bug):
 `vllm.v1.core.kv_cache_utils.get_num_blocks` divides by `page_size`
 and `num_layers` without guarding either, and its unique caller
-asserts only the latter. See [`REPORT.md` §7](./REPORT.md).
+asserts only the latter. End-to-end reachability analysis shows
+the failure is not reachable from any normal CLI invocation; the
+only theoretical path requires a malformed HF model config with
+`head_size == 0`. See [`REPORT.md` §7](./REPORT.md).
 
 See [`REPORT.md`](./REPORT.md) for the full scope, soundness
 caveats, and target roadmap.
@@ -46,6 +49,7 @@ harness/
   round_down_buggy.py       #   precondition dropped                (buggy)
   get_num_blocks.py         # vllm/v1/core/kv_cache_utils.py:935    (non-buggy)
   get_num_blocks_buggy.py   #   latent precondition probe           (FAILED)
+  block_size_zero_cli_path.py # CLI path: --block-size 0            (FAILED, LIVE BUG)
 verify.py                   # manifest + two-phase driver
 Makefile                    # make verify / phase1 / phase2 / verify-only
 REPORT.md                   # progress report

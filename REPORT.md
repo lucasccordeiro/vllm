@@ -1,16 +1,33 @@
 # vLLM ESBMC-Python Verification — Progress Report
 
-**Status**: pipeline operational; four targets verified end-to-end
-(`cdiv`, `round_up`, `round_down`, `get_num_blocks`), each with a
-buggy / non-buggy pair. Full `make verify` (eight entries × two
-phases) completes in ~32 s.
+**Status**: pipeline operational; four function targets plus one
+CLI-path target verified end-to-end. Full `make verify` (nine
+entries × two phases) completes in ~33 s.
 
-**First realistic upstream finding (latent precondition).**
+**First live, CLI-reachable upstream finding (§9).**
+`vllm serve <model> --block-size 0` is accepted by argparse, passes
+through `CacheConfig` (which uses `SkipValidation[int]`), passes
+through `Platform.update_block_size_for_backend` (which preserves
+user-specified values), and crashes engine init with
+`ZeroDivisionError` inside `cdiv(max_model_len, self.block_size)`
+at `vllm/v1/kv_cache_interface.py:218`. The
+`vllm_config.validate_block_size()` call at
+`vllm/v1/engine/core.py:283` runs too late to produce a clean
+error. The ESBMC counterexample for
+`block_size_zero_cli_path.py` is the bug witness; the fix is a
+one-line `Field(gt=0)` on `CacheConfig.block_size` (or an early
+explicit check in `_apply_block_size_default`).
+
+**First latent-precondition finding (defensive, not a live bug; §7).**
 `vllm.v1.core.kv_cache_utils.get_num_blocks` has no in-function
 guard on `page_size > 0` or `num_layers > 0`, and its unique caller
 asserts only `group_size > 0` (= `num_layers`). ESBMC produces a
 deterministic counterexample at `page_size == 0` (CWE-369,
-ZeroDivisionError). See §7.
+ZeroDivisionError). End-to-end reachability analysis (§7) shows
+the failure is **not reachable from any normal upstream invocation**:
+the only theoretical path requires a malformed HuggingFace model
+config with `head_size == 0`. The finding is a defensive-invariant
+gap, not an exploitable bug.
 
 **Pin**: vllm-project/vllm @ commit `4438b6e` (HEAD at session start).
 
@@ -40,16 +57,21 @@ engine. Structure mirrors the AWS-Neuron NKI PoC (see
 | 2 | `vllm.utils.math_utils.round_up` | `vllm/utils/math_utils.py:20` |
 | 3 | `vllm.utils.math_utils.round_down` | `vllm/utils/math_utils.py:25` |
 | 4 | `vllm.v1.core.kv_cache_utils.get_num_blocks` | `vllm/v1/core/kv_cache_utils.py:935` |
+| 5 | `--block-size 0` CLI path | `vllm/engine/arg_utils.py` → `vllm/v1/kv_cache_interface.py:218` |
 
 Targets 1–3 are pure integer helpers with explicit preconditions;
 both the non-buggy and buggy entries are toy contracts that
 demonstrate the pipeline.
 
-Target 4 is the first real-call-site target. The non-buggy entry
-verifies the function with the implicit precondition asserted; the
-buggy entry **deliberately mirrors what the upstream type signature
-permits** (`page_size >= 0`, `num_layers >= 0`) and produces a
-genuine counterexample. See §7.
+Target 4 is the first real-call-site target. Reachability analysis
+(§7) classifies its `*_buggy` counterexample as a latent /
+defensive-invariant gap, not a live bug.
+
+Target 5 is the first **live, CLI-reachable** finding (§9). Unlike
+target 4's buggy variant, target 5's preconditions faithfully model
+what the upstream argument-parsing and config-validation chain
+permits. The FAILED Phase-1 verdict is a counterexample for a real
+defect.
 
 ## 2. What is verified
 
@@ -154,7 +176,7 @@ alongside functions from the same module*
 (`https://github.com/esbmc/esbmc/issues/4744`). Concatenation
 remains the working workaround.
 
-## 7. Latent precondition in `get_num_blocks`
+## 7. Latent precondition in `get_num_blocks` (defensive, not live)
 
 Upstream source (`vllm/v1/core/kv_cache_utils.py:935`):
 
@@ -180,9 +202,7 @@ plays the role of `num_layers`. It does **not** assert
 `get_uniform_page_size(...)` (line 1300), which in turn returns a
 single value drawn from each layer's `page_size_bytes` property —
 ultimately the product of model config fields (`block_size`,
-`num_kv_heads`, `head_size`, dtype byte width). All practical model
-configs have positive `page_size`, but the type system does not
-enforce it, and no defensive assert is in place.
+`num_kv_heads`, `head_size`, dtype byte width).
 
 **ESBMC counterexample** (Phase 1, `get_num_blocks_buggy.py`):
 
@@ -197,44 +217,125 @@ Violated property:
 VERIFICATION FAILED
 ```
 
-**Verdict on whether to report upstream**: it is a latent
-precondition rather than a live bug — no current caller can pass
-`page_size == 0` in normal operation, because the only call site
-fully constructs `page_size` from validated model config. But the
-shape is fragile: a future call site, or a malformed
-`KVCacheSpec` subclass returning 0 from `page_size_bytes`, would
-silently raise `ZeroDivisionError` deep inside KV cache config.
-Adding `assert page_size > 0` (mirroring the existing
-`assert group_size > 0`) is a one-line hardening. Whether to
-propose this as a PR is a judgment call for the maintainer.
+### Reachability analysis
+
+`page_size_bytes` for an `AttentionSpec` factors as
+`2 * block_size * num_kv_heads * head_size * dtype_size` (plus
+additive padded/scale terms). For `page_size == 0` to reach
+`get_num_blocks`, one of these factors must be zero. Going factor
+by factor against the current upstream code:
+
+| Factor | Validation | Can be 0? | Earlier crash before `get_num_blocks`? |
+|---|---|---|---|
+| `dtype_size` | enum-bounded | no | n/a |
+| `num_kv_heads` | clamped at `vllm/config/model.py:1302` to `max(1, …)` | no | n/a |
+| `block_size` | none (`vllm/config/cache.py:47` uses `SkipValidation[int]`) | yes via `--block-size 0` | **yes** — `cdiv(max_model_len, self.block_size)` at `vllm/v1/kv_cache_interface.py:218` (inside `KVCacheSpec.max_memory_usage_bytes`, called by `check_enough_kv_cache_memory`) fires first |
+| `head_size` | none (`vllm/config/model_arch.py:38`, raw HF-config read) | only via malformed HF config | no — `cdiv(max_model_len, block_size) * 0 = 0`, memory check passes trivially, `get_num_blocks` is first crash |
+
+**Verdict.** Not reachable from a normal CLI invocation. The only
+theoretical path requires a corrupt model with `head_size == 0` in
+its HuggingFace config. Real models do not have this. The finding
+is **a defensive-invariant gap, not a live bug**. The
+one-line hardening `assert page_size > 0` (mirroring the existing
+`assert group_size > 0`) would close the gap defensively, but
+proposing it upstream is a judgment call — the maintainers may
+reasonably prefer to keep the function lean.
+
+The PoC's value here is that the analysis is now mechanised: the
+same harness pattern will catch this if a future call site or a
+new `KVCacheSpec` subclass with a different `page_size_bytes`
+formula breaks the implicit invariant.
 
 ## 8. Additional ESBMC-Python frontend gaps observed
 
 Building the `get_num_blocks` harness surfaced three further
-Python-frontend limitations in ESBMC 8.3.0 that drove the design
-choice to keep `vllm_config` opaque and stub `may_override_num_blocks`
-as identity. None blocked target #4; they will block target #5
-(`FreeKVCacheBlockQueue.popleft_n`) unless worked around.
+Python-frontend limitations in ESBMC 8.3.0. All filed upstream
+with minimal reproducers:
 
-1. **PEP 604 unions on class attributes are unsupported.**
-   `self.x: int | None = None` produces
+1. **esbmc/esbmc#4745** — PEP 604 union on class attribute
+   (`self.x: int | None = None`) produces
    `WARNING: Skipping attribute 'x' with unsupported annotation type`
-   followed by `ERROR: Cannot resolve nested attribute: x`.
+   then `ERROR: Attribute "x" not found` on access.
 
-2. **`typing.Optional[int]` triggers an internal assertion crash.**
-   Reproducer below; ESBMC aborts with
-   `Assertion failed: (ta != nullptr && "Tuple AST mismatch")`,
-   not a graceful error.
+2. **esbmc/esbmc#4746** — `is not None` on `typing.Optional[int]`
+   errors with
+   `Unsupported comparison between pointer-backed and non-pointer values`.
 
-3. **Nested attribute access on user classes is unresolved.**
-   Even with non-union attribute types, `outer.inner.x` raises
-   `ERROR: Variable 'ESBMC_default_<...>__init___<...>' is not
-   defined in function 'Outer'`. Single-level attribute access
-   works.
+3. **esbmc/esbmc#4747** — Class `__init__` with default value
+   referencing a module-level name: the synthesized
+   `ESBMC_default_<Class>___init___<param>` is not in scope at
+   the call site. Literal defaults and plain-function defaults
+   work; only class `__init__` with a named default fails.
 
-These will be filed as separate `esbmc/esbmc` issues with minimal
-reproducers in the next session, alongside the patch sketch for the
-already-filed #4744.
+A fourth issue, **esbmc/esbmc#4748** (to be filed), captures a
+slicer / reachability quirk observed while building
+`block_size_zero_cli_path.py`: tightening a precondition from
+`0 <= a` to `1 <= a` caused ESBMC to slice away the CWE-369
+division-by-zero VCC and report `VERIFICATION SUCCESSFUL` despite
+the divisor being permitted to be zero. Workaround in this PoC:
+keep the dividend precondition at `>= 0`. The reproducer is the
+git history of `harness/block_size_zero_cli_path.py`.
+
+## 9. Live, CLI-reachable bug: `--block-size 0` crashes engine init
+
+**Severity**: low security risk (requires the user to pass an
+invalid value), but a UX defect — the user sees an internal
+`ZeroDivisionError` stack trace instead of a clean
+`block_size must be positive` error. CLI-reachable, one-line fix.
+
+### Trace (all confirmed against pinned upstream `4438b6e`)
+
+1. **CLI** (`vllm/engine/arg_utils.py:1117`): `--block-size` is
+   wired via argparse with no `choices=` and no `gt=0` filter.
+2. **Dataclass** (`vllm/config/cache.py:47`):
+   `block_size: SkipValidation[int]` — Pydantic skips validation.
+   `_apply_block_size_default` only fills a default if `None`;
+   `0` passes through and sets `user_specified_block_size=True`.
+3. **Backend override** (`vllm/platforms/interface.py:489–493`):
+   `Platform.update_block_size_for_backend` overrides
+   `block_size` to a backend-preferred value **only if**
+   `user_specified_block_size is False`. With `--block-size 0`,
+   the override is skipped and `0` is preserved.
+4. **First crash** (`vllm/v1/kv_cache_interface.py:218`):
+   `KVCacheSpec.max_memory_usage_bytes` evaluates
+   `cdiv(max_model_len, self.block_size) * page_size_bytes`.
+   `cdiv(N, 0)` raises `ZeroDivisionError`.
+5. **Too-late validator** (`vllm/v1/engine/core.py:283`):
+   `vllm_config.validate_block_size()` is invoked *after* step 4
+   fires, so it never gets the chance to produce a clean error.
+   Even when reached, `validate_block_size` does **not** check
+   `block_size > 0`; it only validates DCP and Mamba constraints.
+
+### ESBMC harness and counterexample
+
+`harness/block_size_zero_cli_path.py` models the call shape
+(`q = cdiv(max_model_len, user_block_size)`) under preconditions
+that match what the upstream chain permits (`0 <= user_block_size`,
+no upper-stream guard). Phase 1 verdict:
+
+```
+[Counterexample]
+State 1 file block_size_zero_cli_path.py line ... function cdiv thread 0
+Violated property:
+  division by zero
+  CWE: CWE-369
+  -b != 0
+VERIFICATION FAILED
+```
+
+### Proposed fix (one of)
+
+- **Field-level**: add `gt=0` to `CacheConfig.block_size`'s
+  Pydantic Field metadata (mirrors the existing `gt=0` on
+  `mamba_block_size`).
+- **Early check**: in `CacheConfig._apply_block_size_default`,
+  add `elif self.block_size <= 0: raise ValueError(...)`.
+- **Validator-level**: extend `VllmConfig.validate_block_size`
+  to assert `block_size > 0`, **and** move the call earlier
+  (before KV cache spec construction).
+
+To be reported upstream as a vLLM issue with the ESBMC
+counterexample as the witness.
 
 ## 5. Verdict table
 
@@ -248,8 +349,15 @@ already-filed #4744.
 | `round_down_buggy`     | FAILED (expected)      | skipped                      |
 | `get_num_blocks`       | SUCCESSFUL (expected)  | SUCCESSFUL (expected)        |
 | `get_num_blocks_buggy` | FAILED (expected)      | skipped                      |
+| `block_size_zero_cli_path` | **FAILED (live bug witness)** | skipped              |
 
-Wall-clock: ~32 s for `make verify` end-to-end on aarch64 macOS.
+Wall-clock: ~33 s for `make verify` end-to-end on aarch64 macOS.
+
+The `block_size_zero_cli_path` FAILED verdict is the ESBMC
+counterexample for the live `--block-size 0` bug documented in §9.
+Unlike `*_buggy` entries (deliberately-weakened harnesses), this
+target's preconditions faithfully model what the CLI accepts; the
+FAILED verdict witnesses a real, CLI-reachable defect.
 
 ## 6. Roadmap — remaining targets
 
