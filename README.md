@@ -7,17 +7,27 @@ integer / index arithmetic, modelled on the
 
 ## Status
 
-Four targets shipped — `cdiv`, `round_up`, `round_down`,
-`get_num_blocks` — each with a buggy / non-buggy pair. End-to-end
-`make verify` completes in ~32 s.
+Four function targets plus one CLI-path target. End-to-end
+`make verify` (nine entries × two phases) completes in ~33 s.
 
-First latent-precondition finding (defensive, not a live bug):
+**First live, CLI-reachable upstream finding — filed as
+[vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496).**
+`vllm serve <model> --block-size 0` is accepted by argparse,
+passes through every config validator, and crashes engine init with
+`ZeroDivisionError` inside `cdiv(max_model_len, self.block_size)`
+at `vllm/v1/kv_cache_interface.py:218`. The
+`harness/block_size_zero_cli_path.py` ESBMC counterexample is the
+bug witness; the static finding was empirically reproduced by
+installing vLLM from source and triggering the exact crash. One-line
+fix (add `gt=0` to `CacheConfig.block_size`'s Field metadata,
+mirroring the existing constraint on `mamba_block_size`). See
+[`REPORT.md` §9](./REPORT.md).
+
+**First latent-precondition finding (defensive, not a live bug).**
 `vllm.v1.core.kv_cache_utils.get_num_blocks` divides by `page_size`
-and `num_layers` without guarding either, and its unique caller
-asserts only the latter. End-to-end reachability analysis shows
-the failure is not reachable from any normal CLI invocation; the
-only theoretical path requires a malformed HF model config with
-`head_size == 0`. See [`REPORT.md` §7](./REPORT.md).
+and `num_layers` without guarding either; reachability analysis
+shows the failure is not reachable from any normal CLI invocation.
+See [`REPORT.md` §7](./REPORT.md).
 
 See [`REPORT.md`](./REPORT.md) for the full scope, soundness
 caveats, and target roadmap.

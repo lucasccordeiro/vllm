@@ -4,7 +4,8 @@
 CLI-path target verified end-to-end. Full `make verify` (nine
 entries × two phases) completes in ~33 s.
 
-**First live, CLI-reachable upstream finding (§9).**
+**First live, CLI-reachable upstream finding (§9). Filed as
+[vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496).**
 `vllm serve <model> --block-size 0` is accepted by argparse, passes
 through `CacheConfig` (which uses `SkipValidation[int]`), passes
 through `Platform.update_block_size_for_backend` (which preserves
@@ -278,6 +279,8 @@ git history of `harness/block_size_zero_cli_path.py`.
 
 ## 9. Live, CLI-reachable bug: `--block-size 0` crashes engine init
 
+**Filed**: [vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496) (open, labelled `bug`).
+
 **Severity**: low security risk (requires the user to pass an
 invalid value), but a UX defect — the user sees an internal
 `ZeroDivisionError` stack trace instead of a clean
@@ -323,6 +326,34 @@ Violated property:
 VERIFICATION FAILED
 ```
 
+### Empirical confirmation
+
+The static counterexample was reproduced end-to-end by installing
+vLLM from source on macOS arm64
+(`VLLM_TARGET_DEVICE=empty pip install -e .` against the same
+pinned commit `4438b6e`) and running:
+
+```python
+# Step 2: CacheConfig silently accepts block_size=0.
+from vllm.config.cache import CacheConfig
+c = CacheConfig(block_size=0)
+assert c.block_size == 0
+assert c.user_specified_block_size is True   # backend override skipped
+
+# Step 4: exact crash site inside the engine worker.
+import torch
+from vllm.v1.kv_cache_interface import FullAttentionSpec
+from vllm.utils.math_utils import cdiv
+spec = FullAttentionSpec(block_size=0, num_kv_heads=12,
+                         head_size=64, dtype=torch.float16)
+cdiv(2048, spec.block_size) * spec.page_size_bytes
+# ZeroDivisionError: integer division or modulo by zero
+#   at vllm/utils/math_utils.py:12 -> return -(a // -b)
+```
+
+The empirical traceback is included verbatim in upstream issue
+[#43496](https://github.com/vllm-project/vllm/issues/43496).
+
 ### Proposed fix (one of)
 
 - **Field-level**: add `gt=0` to `CacheConfig.block_size`'s
@@ -334,8 +365,10 @@ VERIFICATION FAILED
   to assert `block_size > 0`, **and** move the call earlier
   (before KV cache spec construction).
 
-To be reported upstream as a vLLM issue with the ESBMC
-counterexample as the witness.
+Reported upstream as
+[vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496)
+with the ESBMC counterexample and the empirical traceback as
+witnesses.
 
 ## 5. Verdict table
 
