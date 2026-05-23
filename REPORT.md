@@ -5,12 +5,16 @@
 buggy / non-buggy pair. Full `make verify` (eight entries × two
 phases) completes in ~32 s.
 
-**First realistic upstream finding (latent precondition).**
+**First latent-precondition finding (defensive, not a live bug).**
 `vllm.v1.core.kv_cache_utils.get_num_blocks` has no in-function
 guard on `page_size > 0` or `num_layers > 0`, and its unique caller
 asserts only `group_size > 0` (= `num_layers`). ESBMC produces a
 deterministic counterexample at `page_size == 0` (CWE-369,
-ZeroDivisionError). See §7.
+ZeroDivisionError). End-to-end reachability analysis (§7) shows
+the failure is **not reachable from any normal upstream invocation**:
+the only theoretical path requires a malformed HuggingFace model
+config with `head_size == 0`. The finding is a defensive-invariant
+gap, not an exploitable bug.
 
 **Pin**: vllm-project/vllm @ commit `4438b6e` (HEAD at session start).
 
@@ -49,7 +53,8 @@ Target 4 is the first real-call-site target. The non-buggy entry
 verifies the function with the implicit precondition asserted; the
 buggy entry **deliberately mirrors what the upstream type signature
 permits** (`page_size >= 0`, `num_layers >= 0`) and produces a
-genuine counterexample. See §7.
+genuine counterexample. Reachability analysis (§7) classifies this
+as a latent / defensive-invariant gap, not a live bug.
 
 ## 2. What is verified
 
@@ -154,7 +159,7 @@ alongside functions from the same module*
 (`https://github.com/esbmc/esbmc/issues/4744`). Concatenation
 remains the working workaround.
 
-## 7. Latent precondition in `get_num_blocks`
+## 7. Latent precondition in `get_num_blocks` (defensive, not live)
 
 Upstream source (`vllm/v1/core/kv_cache_utils.py:935`):
 
@@ -180,9 +185,7 @@ plays the role of `num_layers`. It does **not** assert
 `get_uniform_page_size(...)` (line 1300), which in turn returns a
 single value drawn from each layer's `page_size_bytes` property —
 ultimately the product of model config fields (`block_size`,
-`num_kv_heads`, `head_size`, dtype byte width). All practical model
-configs have positive `page_size`, but the type system does not
-enforce it, and no defensive assert is in place.
+`num_kv_heads`, `head_size`, dtype byte width).
 
 **ESBMC counterexample** (Phase 1, `get_num_blocks_buggy.py`):
 
@@ -197,16 +200,34 @@ Violated property:
 VERIFICATION FAILED
 ```
 
-**Verdict on whether to report upstream**: it is a latent
-precondition rather than a live bug — no current caller can pass
-`page_size == 0` in normal operation, because the only call site
-fully constructs `page_size` from validated model config. But the
-shape is fragile: a future call site, or a malformed
-`KVCacheSpec` subclass returning 0 from `page_size_bytes`, would
-silently raise `ZeroDivisionError` deep inside KV cache config.
-Adding `assert page_size > 0` (mirroring the existing
-`assert group_size > 0`) is a one-line hardening. Whether to
-propose this as a PR is a judgment call for the maintainer.
+### Reachability analysis
+
+`page_size_bytes` for an `AttentionSpec` factors as
+`2 * block_size * num_kv_heads * head_size * dtype_size` (plus
+additive padded/scale terms). For `page_size == 0` to reach
+`get_num_blocks`, one of these factors must be zero. Going factor
+by factor against the current upstream code:
+
+| Factor | Validation | Can be 0? | Earlier crash before `get_num_blocks`? |
+|---|---|---|---|
+| `dtype_size` | enum-bounded | no | n/a |
+| `num_kv_heads` | clamped at `vllm/config/model.py:1302` to `max(1, …)` | no | n/a |
+| `block_size` | none (`vllm/config/cache.py:47` uses `SkipValidation[int]`) | yes via `--block-size 0` | **yes** — `cdiv(max_model_len, self.block_size)` at `vllm/v1/kv_cache_interface.py:218` (inside `KVCacheSpec.max_memory_usage_bytes`, called by `check_enough_kv_cache_memory`) fires first |
+| `head_size` | none (`vllm/config/model_arch.py:38`, raw HF-config read) | only via malformed HF config | no — `cdiv(max_model_len, block_size) * 0 = 0`, memory check passes trivially, `get_num_blocks` is first crash |
+
+**Verdict.** Not reachable from a normal CLI invocation. The only
+theoretical path requires a corrupt model with `head_size == 0` in
+its HuggingFace config. Real models do not have this. The finding
+is **a defensive-invariant gap, not a live bug**. The
+one-line hardening `assert page_size > 0` (mirroring the existing
+`assert group_size > 0`) would close the gap defensively, but
+proposing it upstream is a judgment call — the maintainers may
+reasonably prefer to keep the function lean.
+
+The PoC's value here is that the analysis is now mechanised: the
+same harness pattern will catch this if a future call site or a
+new `KVCacheSpec` subclass with a different `page_size_bytes`
+formula breaks the implicit invariant.
 
 ## 8. Additional ESBMC-Python frontend gaps observed
 
