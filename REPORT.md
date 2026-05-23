@@ -1,18 +1,23 @@
-# vLLM ESBMC-Python Verification — Session 1 Report
+# vLLM ESBMC-Python Verification — Progress Report
 
-**Status**: pipeline operational, one target verified end-to-end (buggy /
-non-buggy pair), Phase 1 + Phase 2 both run in under 8 s.
+**Status**: pipeline operational; three targets verified end-to-end
+(`cdiv`, `round_up`, `round_down`), each with a buggy / non-buggy pair.
+Full `make verify` (six entries × two phases) completes in ~24 s.
+
+**No real upstream bug found yet.** All FAILED verdicts so far are
+deliberately-weakened harnesses confirming the pipeline. The next
+target (`get_num_blocks`) is the first realistic bug-found candidate.
 
 **Pin**: vllm-project/vllm @ commit `4438b6e` (HEAD at session start).
 
 **Verifier**: ESBMC 8.3.0 (aarch64, macOS), Python frontend (PR #4683-era,
 `__ESBMC_unreachable` and `--enable-unreachability-intrinsic` available).
 
-## 1. Scope of this session
+## 1. Scope
 
-This is the proof-of-pipeline for applying ESBMC-Python to the vLLM
-inference engine. The structure mirrors the working AWS-Neuron NKI
-PoC (see `https://github.com/lucasccordeiro/AWS-Neuron`):
+Proof-of-pipeline for applying ESBMC-Python to the vLLM inference
+engine. Structure mirrors the AWS-Neuron NKI PoC (see
+`https://github.com/lucasccordeiro/AWS-Neuron`):
 
 - `harness/stubs.py` — canonical stub library, concatenated in front
   of every entry script.
@@ -23,39 +28,63 @@ PoC (see `https://github.com/lucasccordeiro/AWS-Neuron`):
 - `Makefile` — `make verify`, `make phase1`, `make phase2`,
   `make verify-only T=<target>`.
 
-This session ships one target: **`vllm.utils.math_utils.cdiv`**.
-It is the `tensor_add` analogue: smallest possible target that
-exercises both phases and demonstrates the buggy/non-buggy pair.
+### Targets shipped
+
+| # | Target | Source |
+|---|--------|--------|
+| 1 | `vllm.utils.math_utils.cdiv` | `vllm/utils/math_utils.py:10` |
+| 2 | `vllm.utils.math_utils.round_up` | `vllm/utils/math_utils.py:20` |
+| 3 | `vllm.utils.math_utils.round_down` | `vllm/utils/math_utils.py:25` |
+
+Each ships with a non-buggy entry (precondition asserted, both
+phases SUCCESSFUL) and a buggy entry (precondition dropped, Phase 1
+FAILED via `ZeroDivisionError`).
 
 ## 2. What is verified
 
-### Phase 1 — Functional contract (default flags)
+Each target has the same shape: a non-buggy entry asserts a
+precondition (e.g. divisor `> 0`), inlines the upstream function
+verbatim, and asserts a postcondition. A buggy entry drops the
+precondition.
 
-Entry script asserts the ceiling-division postcondition for the
-real upstream implementation of `cdiv(a, b)`:
+### `cdiv(a, b)`
+
+Postcondition under `0 ≤ a ≤ 2^30`, `1 ≤ b ≤ 2^30`:
 
 ```
-q == cdiv(a, b)  with  0 <= a <= 2^30,  1 <= b <= 2^30
-    implies    q*b >= a   and   (q-1)*b < a
+q == cdiv(a, b)   ⇒   q*b ≥ a   and   (q-1)*b < a
 ```
 
-`cdiv.py` runs with `b > 0` assumed: **VERIFICATION SUCCESSFUL**
-under default flags.
+### `round_up(x, y)`
 
-### Phase 2 — Host arithmetic safety (`--overflow-check`)
+Postcondition under `0 ≤ x ≤ 2^30`, `1 ≤ y ≤ 2^30`:
 
-Same entry, same precondition, enabling CWE-190 (signed overflow)
-and CWE-369 (division-by-zero) checks. The `b > 0` precondition is
-sufficient to rule out the only division site (`a // -b`).
-**VERIFICATION SUCCESSFUL** under `--overflow-check`.
+```
+r == round_up(x, y)   ⇒   r ≥ x   and   r - y < x   and   r % y == 0
+```
 
-### Buggy counterpart — `cdiv_buggy.py`
+### `round_down(x, y)`
 
-Identical to `cdiv.py` but the `1 <= b` assumption is dropped, so
-`b == 0` is reachable. The first call to `a // -b` raises
-`ZeroDivisionError`. **VERIFICATION FAILED** in Phase 1 (Phase 2 is
-skipped because the contract has already failed; this matches the
-AWS-Neuron `tensor_add_buggy` convention).
+Postcondition under `0 ≤ x ≤ 2^30`, `1 ≤ y ≤ 2^30`:
+
+```
+r == round_down(x, y)   ⇒   r ≤ x   and   r + y > x   and   r % y == 0
+```
+
+### Phase 2 (`--overflow-check`)
+
+Same preconditions, with CWE-190 (signed overflow) and CWE-369
+(division-by-zero) enabled. The divisor `> 0` precondition is
+sufficient to rule out the only division site in each function.
+All three non-buggy targets verify SUCCESSFUL under
+`--overflow-check`.
+
+### Buggy counterparts
+
+Dropping the divisor `> 0` precondition makes division-by-zero
+reachable, and Phase 1 reports VERIFICATION FAILED via
+`ZeroDivisionError`. Phase 2 is skipped on buggy entries (matches
+AWS-Neuron's `tensor_add_buggy` convention).
 
 ## 3. Soundness caveats of the stub approach
 
@@ -108,29 +137,30 @@ Workaround in this PoC: concatenate `harness/stubs.py` in front of
 each entry script in a generated `build/` artefact, exactly as the
 AWS-Neuron PoC does. This is the convention going forward.
 
-**Action item**: file `esbmc/esbmc` issue documenting the
-expected-vs-actual behaviour with a minimal reproducer (entry
-script imports a constant from a sibling `stubs.py`, ESBMC reports
-the constant as undefined in the importing function's scope). The
-issue will reference this PoC.
+Filed upstream: **esbmc/esbmc#4744** —
+*[python-frontend] Module-level constants are dropped when imported
+alongside functions from the same module*
+(`https://github.com/esbmc/esbmc/issues/4744`). Concatenation
+remains the working workaround.
 
-## 5. Verdict table (this session)
+## 5. Verdict table
 
-| Target       | Phase 1                 | Phase 2 (`--overflow-check`) |
-|--------------|-------------------------|------------------------------|
-| `cdiv`       | SUCCESSFUL (expected)   | SUCCESSFUL (expected)        |
-| `cdiv_buggy` | FAILED (expected)       | skipped                      |
+| Target             | Phase 1                | Phase 2 (`--overflow-check`) |
+|--------------------|------------------------|------------------------------|
+| `cdiv`             | SUCCESSFUL (expected)  | SUCCESSFUL (expected)        |
+| `cdiv_buggy`       | FAILED (expected)      | skipped                      |
+| `round_up`         | SUCCESSFUL (expected)  | SUCCESSFUL (expected)        |
+| `round_up_buggy`   | FAILED (expected)      | skipped                      |
+| `round_down`       | SUCCESSFUL (expected)  | SUCCESSFUL (expected)        |
+| `round_down_buggy` | FAILED (expected)      | skipped                      |
 
-Wall-clock: ~8 s for `make verify` end-to-end on aarch64 macOS.
+Wall-clock: ~24 s for `make verify` end-to-end on aarch64 macOS.
 
-## 6. Roadmap — next 3–5 targets
+## 6. Roadmap — remaining targets
 
 In order of increasing harness complexity:
 
-1. **`round_up` / `round_down`** — `vllm/utils/math_utils.py:20,25`.
-   Same shape as `cdiv`. Adds Phase-2 coverage for overflow in the
-   `(x + y - 1)` intermediate, which is a classic real-bug pattern
-   independent of division.
+1. ~~`round_up` / `round_down`~~ — shipped (this commit).
 
 2. **`next_power_of_2`** and **`largest_power_of_2_divisor`** —
    `vllm/utils/math_utils.py:15,30`. Tests `(n - 1).bit_length()`
@@ -140,8 +170,9 @@ In order of increasing harness complexity:
 3. **`get_num_blocks`** — `vllm/v1/core/kv_cache_utils.py:935`.
    Real vLLM call site with two chained divisions
    (`available_memory // page_size // num_layers`) and no input
-   guard. Strong upstream-reportable bug-found candidate
-   (zero `page_size` or `num_layers` is reachable).
+   guard. **First realistic upstream-reportable bug-found
+   candidate** — zero `page_size` or `num_layers` would be reachable
+   from any caller that does not pre-validate config.
 
 4. **`FreeKVCacheBlockQueue.popleft_n`** —
    `vllm/v1/core/kv_cache_utils.py:253`. First target needing a

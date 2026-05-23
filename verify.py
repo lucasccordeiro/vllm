@@ -53,6 +53,30 @@ TARGETS: list[Target] = [
         expected="FAILED",
         safety_expected=None,  # Phase 1 already FAILS; Phase 2 not meaningful.
     ),
+    Target(
+        name="round_up",
+        entry="round_up.py",
+        expected="SUCCESSFUL",
+        safety_expected="SUCCESSFUL",
+    ),
+    Target(
+        name="round_up_buggy",
+        entry="round_up_buggy.py",
+        expected="FAILED",
+        safety_expected=None,
+    ),
+    Target(
+        name="round_down",
+        entry="round_down.py",
+        expected="SUCCESSFUL",
+        safety_expected="SUCCESSFUL",
+    ),
+    Target(
+        name="round_down_buggy",
+        entry="round_down_buggy.py",
+        expected="FAILED",
+        safety_expected=None,
+    ),
 ]
 
 
