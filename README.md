@@ -49,6 +49,7 @@ harness/
   round_down_buggy.py       #   precondition dropped                (buggy)
   get_num_blocks.py         # vllm/v1/core/kv_cache_utils.py:935    (non-buggy)
   get_num_blocks_buggy.py   #   latent precondition probe           (FAILED)
+  block_size_zero_cli_path.py # CLI path: --block-size 0            (FAILED, LIVE BUG)
 verify.py                   # manifest + two-phase driver
 Makefile                    # make verify / phase1 / phase2 / verify-only
 REPORT.md                   # progress report
