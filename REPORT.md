@@ -68,6 +68,7 @@ engine. Structure mirrors the AWS-Neuron NKI PoC (see
 | 7 | `vllm.utils.math_utils.largest_power_of_2_divisor` | `vllm/utils/math_utils.py:30` (loop reimpl; same blocker as #6) |
 | 8 | `--hash-block-size 0` CLI path | `vllm/engine/arg_utils.py` → `vllm/v1/core/kv_cache_utils.py:628` |
 | 9 | `--hash-block-size -k` propagation | `vllm/v1/core/kv_cache_utils.py:660-680` (first-request infinite loop in `request_block_hasher`) |
+| 10 | `--max-model-len 0` CLI path | `vllm/engine/arg_utils.py:802` → `vllm/v1/core/sched/scheduler.py:397` (negative `num_new_tokens` propagates silently into KV-cache arithmetic) |
 
 Targets 1–3 are pure integer helpers with explicit preconditions;
 both the non-buggy and buggy entries are toy contracts that
@@ -405,12 +406,13 @@ every non-buggy entry has > 0.
 | `block_size_zero_cli_path` | **FAILED (live bug witness)** | skipped                      | 2    |
 | `hash_block_size_zero_cli_path` | **FAILED (live bug witness, [vllm-project/vllm#43521](https://github.com/vllm-project/vllm/issues/43521))** | skipped                  | 2    |
 | `hash_block_size_negative_propagation` | **FAILED (live bug witness, infinite loop in `request_block_hasher`)** | skipped         | 1    |
+| `max_model_len_zero_cli_path` | **FAILED (live bug witness, scheduler.py:397 negative `num_new_tokens`)** | skipped         | 1    |
 | `next_power_of_2`          | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 5    |
 | `next_power_of_2_buggy`    | FAILED (expected)             | skipped                      | 5    |
 | `largest_power_of_2_divisor`       | SUCCESSFUL (expected) | SUCCESSFUL (expected)        | 39   |
 | `largest_power_of_2_divisor_buggy` | FAILED (expected)     | skipped                      | 39   |
 
-Wall-clock: ~65 s for `make verify` end-to-end on aarch64 macOS.
+Wall-clock: ~74 s for `make verify` end-to-end on aarch64 macOS.
 
 The four `*_power_of_2*` targets use loop reimplementations
 because ESBMC's Python frontend does not yet terminate on

@@ -122,6 +122,18 @@ TARGETS: list[Target] = [
         expected="FAILED",
         safety_expected=None,
     ),
+    Target(
+        # Fourth live-bug candidate from the broader audit:
+        # --max-model-len 0 CLI path. ModelConfig accepts ge=-1
+        # so 0 passes; _get_and_verify_max_len leaves 0 alone
+        # (confirmed empirically); scheduler.py:397 then computes
+        # num_new_tokens = min(_, max_model_len - 1 - num_computed_tokens)
+        # which goes negative.
+        name="max_model_len_zero_cli_path",
+        entry="max_model_len_zero_cli_path.py",
+        expected="FAILED",
+        safety_expected=None,
+    ),
     # The next four targets use loop reimplementations of upstream's
     # bit-trick functions (see harness headers for the equivalence
     # argument). --unwind 32 covers the longest loop the
