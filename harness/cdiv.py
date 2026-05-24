@@ -26,10 +26,12 @@ def main() -> None:
     a = nondet_int()
     b = nondet_int()
 
+    # Postcondition `q * b >= a` is non-linear; use SMALL_BOUND
+    # (see stubs.py rationale).
     __ESBMC_assume(0 <= a)
-    __ESBMC_assume(a <= INT_BOUND)
+    __ESBMC_assume(a <= SMALL_BOUND)
     __ESBMC_assume(1 <= b)
-    __ESBMC_assume(b <= INT_BOUND)
+    __ESBMC_assume(b <= SMALL_BOUND)
 
     q = cdiv(a, b)
 

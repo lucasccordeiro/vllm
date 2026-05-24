@@ -15,27 +15,41 @@
 #   - Model only what a target *reads*. Do not invent behaviour.
 #   - Preconditions are `__ESBMC_assume(...)`. Postconditions are
 #     plain `assert ...`.
-#   - The ESBMC intrinsics (`nondet_int`, `__ESBMC_assume`) are
-#     recognised by the frontend as builtins; the placeholder
-#     definitions below exist only so CPython can import this file
-#     for sanity runs and so a human reader can grep for them.
-
-# --- ESBMC-Python intrinsics (placeholders; ESBMC overrides) -------
-
-def nondet_int() -> int:
-    return 0
-
-
-def __ESBMC_assume(_c: bool) -> None:
-    return None
-
+#
+# **DO NOT** add placeholder Python definitions for `nondet_int` or
+# `__ESBMC_assume`. Those names are ESBMC-Python intrinsics; defining
+# them as Python functions causes ESBMC to use the Python definition
+# (e.g. `return 0` for nondet_int), which makes the symbolic value a
+# concrete constant, the precondition `__ESBMC_assume(...)` a no-op,
+# and the rest of the harness vacuous. Every `assert` then gets
+# sliced and ESBMC silently reports VERIFICATION SUCCESSFUL with 0
+# VCCs generated. This was the methodology bug fixed in commit
+# <see fix/stubs-shadowing-intrinsics>. The harness files therefore
+# rely on ESBMC alone to provide these symbols; running them under
+# CPython will raise NameError (intentional — CPython sanity is
+# out of scope for this verifier-only PoC).
 
 # --- Concrete bounds used by entry scripts -------------------------
 #
-# Keep Phase 1 searches finite. Phase 2 (--overflow-check) still
-# probes the full integer range for under/overflow regardless of
-# these bounds.
+# Two bounds because postcondition shape determines tractability:
+#
+#   INT_BOUND  = 1 << 30 — wide window for properties Bitwuzla
+#                          handles linearly (assumptions, single
+#                          division, equality on a derived value).
+#   SMALL_BOUND = 1 << 10 — used by targets whose postcondition has
+#                           non-linear arithmetic in the symbolic
+#                           inputs (e.g. cdiv's `q * b >= a`, where
+#                           q itself is a function of (a, b)).
+#                           Bitwuzla does not terminate in
+#                           reasonable time at INT_BOUND for these
+#                           shapes; SMALL_BOUND covers all realistic
+#                           vLLM call sites (block-table arithmetic
+#                           is well under 1024).
+#
+# Phase 2 (--overflow-check) still probes the full integer range
+# for under/overflow regardless of these bounds.
 INT_BOUND = 1 << 30
+SMALL_BOUND = 1 << 10
 
 
 # --- Minimal vLLM data records -------------------------------------
