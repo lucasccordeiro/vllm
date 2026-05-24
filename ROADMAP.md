@@ -15,17 +15,21 @@ Pinned upstream: `vllm-project/vllm @ 4438b6e7d`. Verifier: ESBMC 8.3.0+ (post-#
 | `round_down` | `vllm/utils/math_utils.py:25` | ✅ Phase 1 + 2 SUCCESSFUL (5 VCCs) |
 | `get_num_blocks` | `vllm/v1/core/kv_cache_utils.py:935` | ✅ Phase 1 + 2 SUCCESSFUL (8 VCCs); latent precondition documented |
 | `--block-size 0` CLI path | `vllm/engine/arg_utils.py:1117` → `vllm/v1/kv_cache_interface.py:218` | ✅ Phase 1 FAILED (live bug witness, vllm-project/vllm#43496, candidate fix #43514) |
+| `next_power_of_2` | `vllm/utils/math_utils.py:15` | ✅ Phase 1 + 2 SUCCESSFUL (5 VCCs) via loop reimplementation; ESBMC `bit_length` OM gap filed as [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756) |
+| `largest_power_of_2_divisor` | `vllm/utils/math_utils.py:30` | ✅ Phase 1 + 2 SUCCESSFUL (6 VCCs) via loop reimplementation; same blocker as above |
 
-Each target also ships a buggy counterpart that exercises the corresponding implicit CWE-369 VCC. Full table with per-target VCCs in [`REPORT.md` §5](./REPORT.md).
+Each target also ships a buggy counterpart that exercises the corresponding implicit CWE-369 VCC or postcondition violation. Full table with per-target VCCs in [`REPORT.md` §5](./REPORT.md).
 
 ## Tier 1 — Cheap follow-ons (pure-int helpers, no new stubs)
 
-Each row: ~30 min of harness work + ~1 min verifier time. Some require the loop-reimplementation trick documented in [`RETROSPECTIVE.md`](./RETROSPECTIVE.md) (*Verification patterns worth carrying forward*) because ESBMC's Python frontend does not yet model `int.bit_length()` and `<<` precisely.
-
-| Target | Source | New stubs | Blockers |
-|---|---|---|---|
-| `next_power_of_2` | `vllm/utils/math_utils.py:15` | none | Loop reimplementation needed; harness sketch is already on a stash. ESBMC `bit_length`/`<<` OM gap to be filed as a separate issue. |
-| `largest_power_of_2_divisor` | `vllm/utils/math_utils.py:30` | none | Same as above. |
+~~All Tier-1 targets shipped~~ — see *Already covered* above. The
+loop-reimplementation pattern that unblocked them is documented
+in [`RETROSPECTIVE.md`](./RETROSPECTIVE.md) (*Verification patterns
+worth carrying forward*, pattern #1 onwards). The remaining OM gap
+on `int.bit_length()` over symbolic input is tracked at
+[esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756);
+once it lands the loop reimplementations can be retired in favour
+of the verbatim upstream forms.
 
 ## Tier 2 — CLI / config validation hunts (live-bug-class targets)
 
@@ -77,7 +81,7 @@ These targets need the first non-trivial stubs in the PoC: a `KVCacheBlock` data
 | Item | Status |
 |---|---|
 | Track [vllm-project/vllm#43514](https://github.com/vllm-project/vllm/pull/43514) (candidate fix for issue #43496) to merge | Open; non-blocking. Doc update will reference the merge commit once landed. |
-| File ESBMC issue: `int.bit_length()` operational model unbounded unwinding on symbolic input | Minimal reproducer is captured in this session's git history (`/tmp/probe_bitlen.py`-style). To be filed before Tier 1 next-power-of-2 work, so the loop-reimplementation workaround can be documented as "pending ESBMC issue #NNNN". |
+| ~~File ESBMC issue: `int.bit_length()` operational model unbounded unwinding on symbolic input~~ | Filed as [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756) with the minimal reproducer that motivated the loop-reimplementation pattern. |
 | File ESBMC issue: slicer drops the CWE-369 VCC when the dividend precondition tightens from `>= 0` to `>= 1` (observed building `block_size_zero_cli_path`) | Lower priority; documented in `RETROSPECTIVE.md` §Stub-correctness as item to file. |
 
 ### vLLM upstream-engagement options
@@ -90,8 +94,8 @@ These targets need the first non-trivial stubs in the PoC: a `KVCacheBlock` data
 
 ## Recommended sequence
 
-1. **Tier 1** (next session): `next_power_of_2` + `largest_power_of_2_divisor` with the loop-reimplementation trick. File the ESBMC `bit_length` OM issue at the same time. Total: ~2 hours including the issue write-up.
-2. **Methodology**: VCC-count assertion in `verify.py`. ~1 hour. Pairs naturally with the Tier-1 PR since the new targets will exercise the guard.
+1. ~~**Tier 1**: `next_power_of_2` + `largest_power_of_2_divisor`~~ — shipped, [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756) filed.
+2. **Methodology**: VCC-count assertion in `verify.py`. ~1 hour. Guards against Finding-1-style vacuous-SUCCESSFUL regressions on future targets.
 3. **Tier 2 audit** of `SkipValidation[int]` fields: static recon only, ~1 hour. Produces a list of CLI-path harness candidates with rough live-bug likelihood. Could surface a second bug like `--block-size 0`.
 4. **Tier 2 harnesses** for the top one or two candidates from the audit, one per session.
 5. **Tier 3, row 1** (`BlockPool.get_usage`): quick sanity check on `num_gpu_blocks == 0` → CWE-369. ~1 hour.
@@ -105,8 +109,7 @@ Cumulative target count and approximate `make verify` wall-clock at each milesto
 
 | Milestone | Cumulative targets | Wall-clock | Live findings to date |
 |---|---|---|---|
-| Today (end of session) | 9 entries (5 unique functions/paths × buggy + non-buggy) | ~50 s | 1 (issue #43496) |
-| End of Tier 1 | +4 entries → 13 | ~70 s | 1 |
+| End of Tier 1 (current) | 13 entries (7 unique functions/paths × buggy + non-buggy) | ~66 s | 1 (issue #43496) |
 | End of Tier 2 audit + 2 CLI-path harnesses | +4 entries → 17 | ~90 s | 1–3 likely |
 | End of Tier 3 (all rows) | +8 entries → 25 | ~3–4 min | open |
 | End of Tier 4 | +6 entries → 31 | ~5–8 min (CI-relevant) | open |

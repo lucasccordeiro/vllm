@@ -389,8 +389,19 @@ results. VCC counts in the rightmost column confirm non-vacuity
 | `get_num_blocks`           | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 8    |
 | `get_num_blocks_buggy`     | FAILED (expected)             | skipped                      | 1    |
 | `block_size_zero_cli_path` | **FAILED (live bug witness)** | skipped                      | 2    |
+| `next_power_of_2`          | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 5    |
+| `next_power_of_2_buggy`    | FAILED (expected)             | skipped                      | 5    |
+| `largest_power_of_2_divisor`       | SUCCESSFUL (expected) | SUCCESSFUL (expected)        | 6    |
+| `largest_power_of_2_divisor_buggy` | FAILED (expected)     | skipped                      | 6    |
 
-Wall-clock: ~50 s for `make verify` end-to-end on aarch64 macOS.
+Wall-clock: ~66 s for `make verify` end-to-end on aarch64 macOS.
+
+The four `*_power_of_2*` targets use loop reimplementations
+because ESBMC's Python frontend does not yet terminate on
+`int.bit_length()` over symbolic input (filed as
+[esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756)).
+Equivalence to upstream is by case analysis for n in [1, 2^30]
+and documented in each harness header.
 
 The `block_size_zero_cli_path` FAILED verdict is the ESBMC
 counterexample for the live `--block-size 0` bug documented in §9.
@@ -405,8 +416,11 @@ In order of increasing harness complexity:
 1. ~~`round_up` / `round_down`~~ — shipped.
 2. ~~`get_num_blocks`~~ — shipped (this commit).
 
-3. **`next_power_of_2`** and **`largest_power_of_2_divisor`** —
-   `vllm/utils/math_utils.py:15,30`. Tests `(n - 1).bit_length()`
+3. ~~`next_power_of_2` and `largest_power_of_2_divisor`~~ —
+   shipped via loop reimplementations
+   (ESBMC `bit_length` OM gap filed as
+   [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756)).
+   Tests `(n - 1).bit_length()`
    and `n & (-n)` corners. Hits `n == 0`, `n < 0`, and the
    two's-complement edge.
 

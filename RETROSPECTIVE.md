@@ -30,6 +30,8 @@ A buggy entry whose Phase 1 already fails skips Phase 2 (matches AWS-Neuron's `t
 | `vllm/utils/math_utils.py:25` (`round_down`) | math helpers | non-buggy + buggy pair, both phases verify (5 VCCs) |
 | `vllm/v1/core/kv_cache_utils.py:935` (`get_num_blocks`) | KV cache config | non-buggy + buggy pair, both phases verify (8 VCCs); buggy variant surfaces latent precondition (see §Real upstream bugs caught) |
 | `vllm/engine/arg_utils.py:1117` → `vllm/v1/kv_cache_interface.py:218` (`--block-size 0` CLI path) | CLI / config / KV cache profiling | first **live, CLI-reachable** finding; ESBMC counterexample = the bug witness; Phase 1 FAILED is the *expected and significant* verdict |
+| `vllm/utils/math_utils.py:15` (`next_power_of_2`) | math helpers | non-buggy + buggy pair via loop reimplementation (5 VCCs each); ESBMC `bit_length` OM gap filed as [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756) |
+| `vllm/utils/math_utils.py:30` (`largest_power_of_2_divisor`) | math helpers | non-buggy + buggy pair via loop reimplementation (6 VCCs each); same blocker |
 
 Pinned upstream commit: `vllm-project/vllm @ 4438b6e7d` (HEAD at session start).
 
@@ -56,6 +58,7 @@ Not modelled (because no current target reads them):
 | [esbmc/esbmc#4746](https://github.com/esbmc/esbmc/issues/4746) | **RESOLVED** ([#4754](https://github.com/esbmc/esbmc/pull/4754)) | "`is not None` on `Optional[int]` errors 'pointer-backed vs non-pointer'" | Same as #4745; together they unlock real `Optional[T]` modelling. |
 | [esbmc/esbmc#4747](https://github.com/esbmc/esbmc/issues/4747) | **RESOLVED** ([#4751](https://github.com/esbmc/esbmc/pull/4751)) | "Class `__init__` default referencing module-level name: `ESBMC_default_*` not in scope" | Allows sentinel-default fields like `CacheConfig(block_size=DEFAULT_BLOCK_SIZE)` in stubs. |
 | [vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496) | **OPEN** (candidate fix [#43514](https://github.com/vllm-project/vllm/pull/43514)) | "`--block-size 0` silently passes validation, crashes engine init with `ZeroDivisionError`" | n/a — upstream code fix, not a PoC rewrite. |
+| [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756) | **OPEN** | "`int.bit_length()` OM unwinds indefinitely on symbolic input despite tight `__ESBMC_assume` bound" | Loop-reimplementation pattern is the current workaround for `next_power_of_2` and `largest_power_of_2_divisor`. Once fixed, the loop models can be retired in favour of the verbatim upstream forms. |
 
 ## Source-rewriting history
 
