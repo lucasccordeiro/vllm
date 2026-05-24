@@ -198,11 +198,83 @@ These are set from model config / engine state, not directly by the user, but th
 ### Priority for harness work
 
 1. **`--num-gpu-blocks-override 0` / negative** — easiest harness (we already model `may_override_num_blocks`); confirms the assertion path. Low-novelty: assertion failure rather than `ZeroDivisionError`. **Likely live**.
-2. **`--max-model-len 0`** — needs to trace through `get_and_verify_max_len` to confirm whether the value is normalised before the scheduler reads it. If not normalised, subtractive arithmetic in `scheduler.py:397` could cause `num_new_tokens` to go negative, then propagate to KV-cache allocation. **Strongest live-bug candidate**.
+2. ~~**`--max-model-len 0`**~~ — ✅ **Shipped and confirmed live** (this commit). Harness `harness/max_model_len_zero_cli_path.py`; ESBMC counterexample at `max_model_len = 0, num_computed_tokens = 0, num_new_tokens = 1` produces `num_new_tokens = -1` at scheduler.py:397. Empirical chain (`_get_and_verify_max_len(0) = 0`; `min(1, -1) = -1`; `cdiv(-1, 16) = 0`) confirms the silent propagation. Detailed write-up in §3 below.
 3. `--max-logprobs` negative — easy to harness; smaller blast radius.
 4. `--long-prefill-token-threshold` negative — model is small but the guard is suggestive of a "treat 0 as off" intent that negatives slip past.
 
 Each item is queued as a follow-up Tier 2 harness in [`ROADMAP.md`](./ROADMAP.md).
+
+## Finding #3 — `--max-model-len 0` silent negative-num_new_tokens propagation
+
+### Trace
+
+1. **CLI** (`vllm/engine/arg_utils.py:802`): `--max-model-len` is wired to `ModelConfig.max_model_len`. Field declared `int = Field(default=None, ge=-1)`; `ge=-1` is the "auto-derive" sentinel and `0` is admitted.
+
+2. **Validator** (`vllm/config/model.py:1729` → `_get_and_verify_max_len` at line 2119): branches on `max_model_len is None or max_model_len == -1` (rewrites from HF config) and on `max_model_len > derived_max_model_len` (raises). For `max_model_len = 0` and any positive `derived_max_model_len`, both branches are skipped and the final `return int(max_model_len)` yields 0. Confirmed empirically:
+
+   ```python
+   from unittest.mock import MagicMock
+   from vllm.config.model import _get_and_verify_max_len
+   hf_config = MagicMock(); hf_config.rope_parameters = None
+   hf_config.model_type = "test"; hf_config.model_max_length = 4096
+   model_arch_config = MagicMock()
+   model_arch_config.derived_max_model_len_and_key = (4096, "_")
+   assert _get_and_verify_max_len(
+       hf_config=hf_config, model_arch_config=model_arch_config,
+       tokenizer_config=None, max_model_len=0,
+       disable_sliding_window=False, sliding_window=None,
+   ) == 0
+   ```
+
+3. **Scheduler** (`vllm/v1/core/sched/scheduler.py:109, 397`): the scheduler reads `self.max_model_len = vllm_config.model_config.max_model_len = 0`. At line 397:
+
+   ```python
+   num_new_tokens = min(
+       num_new_tokens, self.max_model_len - 1 - request.num_computed_tokens
+   )
+   ```
+
+   For a fresh request (`num_computed_tokens = 0`) the right operand is `0 - 1 - 0 = -1`. `min(num_new_tokens, -1) = -1` for any `num_new_tokens > 0`.
+
+4. **Silent downstream propagation**: the negative `num_new_tokens` is not caught by the `if num_new_tokens == 0:` early-return at line 425, and flows into `kv_cache_manager.allocate_slots(request, num_new_tokens=-1, ...)`. Inside `allocate_slots`, `num_tokens_main_model = total_computed_tokens + num_new_tokens` is computed; with `total_computed_tokens = min(_, max_model_len) = min(_, 0) = 0`, the result is `-1`. `num_tokens_need_slot = min(-1 + num_lookahead_tokens, 0) ≤ 0`, then `coordinator.allocate_new_blocks(request_id, num_tokens_need_slot=-1, ...)`. `cdiv(-1, block_size) = 0` (does not raise), so the engine silently allocates 0 blocks for the request.
+
+### ESBMC counterexample
+
+```
+Violated property:
+  file harness/max_model_len_zero_cli_path.py line ... function main
+  assertion num_new_tokens >= 0
+
+  max_model_len = 0
+  num_computed_tokens = 0
+  num_new_tokens (input) = 1
+  num_new_tokens (after line 397) = -1
+```
+
+### Severity
+
+UX defect of the same class as #43521. CLI accepts an obviously invalid value (`--max-model-len 0`); the engine starts without error; the first request is silently scheduled with negative token counts and zero block allocation. Unlike #43521, the failure mode is silent — there is no traceback at startup or on the first request.
+
+### Proposed fix
+
+Tighten the Field constraint from `ge=-1` to a more specific predicate. Two natural shapes:
+
+1. **Custom validator** in `ModelConfig`:
+
+   ```python
+   @field_validator("max_model_len", mode="after")
+   def _check_positive_or_sentinel(cls, v):
+       if v is None or v == -1:
+           return v
+       if v <= 0:
+           raise ValueError(
+               f"max_model_len must be a positive integer or -1 (auto), "
+               f"got {v}."
+           )
+       return v
+   ```
+
+2. **Two-sided constraint**: replace `ge=-1` with an explicit "must be positive or exactly -1" check; `Field(ge=-1, ne=0)` if Pydantic supports it (it doesn't out of the box; need the validator).
 
 ## Out of scope (this audit)
 
