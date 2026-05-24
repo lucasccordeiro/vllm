@@ -97,6 +97,17 @@ TARGETS: list[Target] = [
         expected="FAILED",
         safety_expected=None,
     ),
+    Target(
+        # Second live-bug target: --hash-block-size 0 CLI path
+        # (AUDIT.md Finding #2). Same shape as block_size_zero;
+        # crashes via `bs % hash_block_size` in
+        # resolve_kv_cache_block_sizes before the adjacent
+        # ValueError branch can produce a clean message.
+        name="hash_block_size_zero_cli_path",
+        entry="hash_block_size_zero_cli_path.py",
+        expected="FAILED",
+        safety_expected=None,
+    ),
     # The next four targets use loop reimplementations of upstream's
     # bit-trick functions (see harness headers for the equivalence
     # argument). --unwind 32 covers the longest loop the
