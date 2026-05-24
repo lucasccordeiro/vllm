@@ -32,7 +32,7 @@ Two `SkipValidation[int]` fields total. The rest are non-int and out of scope pe
 | # | Field | Severity | Status |
 |---|---|---|---|
 | 1 | `CacheConfig.block_size` | **Live, CLI-reachable** (filed: [vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496); candidate fix: [vllm-project/vllm#43514](https://github.com/vllm-project/vllm/pull/43514)) | Already shipped as the `block_size_zero_cli_path` target. Closes when #43514 merges. |
-| 2 | `CacheConfig.hash_block_size` | **Live, CLI-reachable, reproduced** | Harness `hash_block_size_zero_cli_path.py` ships in this PR; ESBMC counterexample matches an empirical sandbox crash at `vllm/v1/core/kv_cache_utils.py:628`. Upstream issue filing in progress. |
+| 2 | `CacheConfig.hash_block_size` | **Live, CLI-reachable, reproduced, filed** | Filed as [vllm-project/vllm#43521](https://github.com/vllm-project/vllm/issues/43521). Harness `hash_block_size_zero_cli_path.py` produces the CWE-369 counterexample; an empirical sandbox reproducer hits the exact crash at `vllm/v1/core/kv_cache_utils.py:628`. |
 
 ## Finding #1 — `CacheConfig.block_size`
 
@@ -114,7 +114,11 @@ early-return at `kv_cache_utils.py:577` and are unaffected.
 
 1. ✅ Harness shipped (`harness/hash_block_size_zero_cli_path.py`).
 2. ✅ Empirical reproduction confirms the static counterexample.
-3. File upstream as a `vllm-project/vllm` issue with both witnesses + the one-line fix proposal.
+3. ✅ Filed upstream as [vllm-project/vllm#43521](https://github.com/vllm-project/vllm/issues/43521) with both witnesses + the one-line fix proposal.
+
+### Follow-up (queued, not yet filed)
+
+Adjacent failure mode `--hash-block-size -1` does not crash at line 628 (Python's `bs % -1 == 0` for any `bs ≥ 0`), so the negative value silently propagates to downstream consumers in `vllm/v1/core/kv_cache_coordinator.py:429-431` and `vllm/v1/kv_offload/base.py:363`. **Unverified.** Worth a separate harness + sandbox reproducer; if confirmed to cause silent data corruption (rather than crash later), file as a distinct issue. Tracked as a ROADMAP follow-up.
 
 ## Out of scope (this audit)
 
