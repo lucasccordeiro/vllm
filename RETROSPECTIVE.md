@@ -118,7 +118,7 @@ The intent was that ESBMC would treat the names as intrinsics and override the b
 
 **General lesson.** **Never define a function in a stub library whose name might be claimed as a verifier intrinsic.** If the verifier's intrinsic-recognition order is "user definition wins", a sanity-friendly Python body silently turns symbolic execution into concrete execution and makes every `assert` reachable only on the trivial path. The VCC-count guard now in `verify.py` (see *Verification patterns worth carrying forward* §6) enforces this as a hard precondition for every `SUCCESSFUL` verdict — a future Finding-1-style regression would be caught at the next `make verify` run.
 
-**Impact on prior findings.** The live `--block-size 0` finding (#43496) and the latent `get_num_blocks` precondition both survived the audit — both relied on ESBMC's implicit CWE-369 check, not the (vacuous) user asserts. The empirical end-to-end reproduction in REPORT.md §9 independently confirms the live crash. Documentation and verdict tables were rewritten post-audit to reflect real VCC counts.
+**Impact on prior findings.** The live `--block-size 0` finding (#43496) and the latent `get_num_blocks` precondition both survived the audit — both relied on ESBMC's implicit CWE-369 check, not the (vacuous) user asserts. The empirical end-to-end reproduction in REPORT.md §8 independently confirms the live crash. Documentation and verdict tables were rewritten post-audit to reflect real VCC counts.
 
 ## Verification patterns worth carrying forward
 

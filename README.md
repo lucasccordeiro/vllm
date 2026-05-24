@@ -21,7 +21,7 @@ bug witness; the static finding was empirically reproduced by
 installing vLLM from source and triggering the exact crash. One-line
 fix (add `gt=0` to `CacheConfig.block_size`'s Field metadata,
 mirroring the existing constraint on `mamba_block_size`). See
-[`REPORT.md` §9](./REPORT.md).
+[`REPORT.md` §8](./REPORT.md).
 
 **First latent-precondition finding (defensive, not a live bug).**
 `vllm.v1.core.kv_cache_utils.get_num_blocks` divides by `page_size`

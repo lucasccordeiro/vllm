@@ -2,12 +2,12 @@
 
 **Status**: pipeline operational; four function targets plus one
 CLI-path target verified end-to-end **under real symbolic
-execution** (see §10 for the methodology audit and fix). Full
+execution** (see §9 for the methodology audit and fix). Full
 `make verify` (nine entries × two phases) completes in ~50 s on
 aarch64 macOS, with each non-buggy entry generating between 3 and
 8 verification conditions.
 
-**First live, CLI-reachable upstream finding (§9). Filed as
+**First live, CLI-reachable upstream finding (§8). Filed as
 [vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496);
 a candidate fix is in flight as
 [vllm-project/vllm#43514](https://github.com/vllm-project/vllm/pull/43514).**
@@ -83,7 +83,7 @@ input ([esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756));
 the loop equivalence to upstream is by case analysis for n in
 [1, 2^30] (see each harness header).
 
-Targets 5, 8, and 9 are **live, CLI-reachable** findings (§9 and
+Targets 5, 8, and 9 are **live, CLI-reachable** findings (§8 and
 [`AUDIT.md`](./AUDIT.md) Finding #2). Unlike target 4's buggy
 variant, their preconditions faithfully model what the upstream
 argument-parsing and config-validation chain permits. The FAILED
@@ -259,31 +259,7 @@ same harness pattern will catch this if a future call site or a
 new `KVCacheSpec` subclass with a different `page_size_bytes`
 formula breaks the implicit invariant.
 
-## 8. Additional ESBMC-Python frontend gaps observed (all resolved)
-
-Building the `get_num_blocks` harness surfaced three further
-Python-frontend limitations in ESBMC 8.3.0. All filed upstream
-with minimal reproducers, all merged on 2026-05-24, and all
-re-verified against the rebuilt binary (no error; real symbolic
-execution generating > 0 VCCs):
-
-| Issue | Title | Fix PR | Re-verified |
-|---|---|---|---|
-| [esbmc/esbmc#4745](https://github.com/esbmc/esbmc/issues/4745) | PEP 604 union on class attribute (`self.x: int \| None = None`) — `Skipping attribute` + `Attribute "x" not found` | [#4752](https://github.com/esbmc/esbmc/pull/4752) | ✅ ESBMC now models `int \| None` as a tagged union and explores both branches symbolically |
-| [esbmc/esbmc#4746](https://github.com/esbmc/esbmc/issues/4746) | `is not None` on `typing.Optional[int]` — `Unsupported comparison between pointer-backed and non-pointer values` | [#4754](https://github.com/esbmc/esbmc/pull/4754) | ✅ `is not None` on `Optional[int]` resolves cleanly |
-| [esbmc/esbmc#4747](https://github.com/esbmc/esbmc/issues/4747) | Class `__init__` default referencing a module-level name — `ESBMC_default_*` not in scope at call site | [#4751](https://github.com/esbmc/esbmc/pull/4751) | ✅ Sentinel defaults resolve at the call site |
-
-A slicer / reachability quirk observed while building
-`block_size_zero_cli_path.py` (tightening a precondition from
-`0 <= a` to `1 <= a` once caused ESBMC to silently drop the
-CWE-369 division-by-zero VCC) is **no longer reproducible** on
-the rebuilt binary — both the loose and tight forms correctly
-report `FAILED` with the CWE-369 witness intact. Whatever bug
-caused the original observation has been incidentally fixed,
-either in the ESBMC merge train of 2026-05-24 or elsewhere; no
-issue is filed.
-
-## 9. Live, CLI-reachable bug: `--block-size 0` crashes engine init
+## 8. Live, CLI-reachable bug: `--block-size 0` crashes engine init
 
 **Filed**: [vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496) (open, labelled `bug`).
 
@@ -379,7 +355,7 @@ witnesses.
 ## 5. Verdict table
 
 All verdicts below come from **real symbolic execution** — the
-methodology audit in §10 retired the previous vacuous-SUCCESSFUL
+methodology audit in §9 retired the previous vacuous-SUCCESSFUL
 results, and `verify.py` now enforces a hard guard
 (`FAIL (vacuous: 0 VCCs)`) so any future regression of this class
 is caught immediately. VCC counts in the rightmost column report
@@ -414,7 +390,7 @@ Equivalence to upstream is by case analysis for n in [1, 2^30]
 and documented in each harness header.
 
 The `block_size_zero_cli_path` FAILED verdict is the ESBMC
-counterexample for the live `--block-size 0` bug documented in §9.
+counterexample for the live `--block-size 0` bug documented in §8.
 Unlike `*_buggy` entries (deliberately-weakened harnesses), this
 target's preconditions faithfully model what the CLI accepts; the
 FAILED verdict witnesses a real, CLI-reachable defect.
@@ -438,8 +414,11 @@ In order of increasing harness complexity:
    `vllm/v1/core/kv_cache_utils.py:253`. First target needing a
    real stub (linked-list `KVCacheBlock` dataclass at concrete
    K=4). Proof obligations: `num_free_blocks` monotone-decreasing;
-   `len(ret) == n`; no block popped twice. Blocked on ESBMC-Python
-   class-attribute fixes (see §8).
+   `len(ret) == n`; no block popped twice. Previously blocked on
+   ESBMC-Python class-attribute fixes; those landed in
+   [esbmc/esbmc#4752](https://github.com/esbmc/esbmc/pull/4752),
+   [#4754](https://github.com/esbmc/esbmc/pull/4754),
+   [#4751](https://github.com/esbmc/esbmc/pull/4751) (see §4).
 
 5. **`BlockPool.get_new_blocks`** —
    `vllm/v1/core/block_pool.py:333`. Builds on (4). Adds
@@ -471,7 +450,7 @@ no build/concatenation step is needed since
 landed (`from stubs import …` works for both constants and
 intrinsics).
 
-## 10. Methodology audit
+## 9. Methodology audit
 
 Moved to [`RETROSPECTIVE.md`](./RETROSPECTIVE.md) (*Stub-correctness
 and methodology incidents → Finding 1*). The audit covers the
