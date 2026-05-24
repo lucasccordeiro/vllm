@@ -259,35 +259,29 @@ same harness pattern will catch this if a future call site or a
 new `KVCacheSpec` subclass with a different `page_size_bytes`
 formula breaks the implicit invariant.
 
-## 8. Additional ESBMC-Python frontend gaps observed
+## 8. Additional ESBMC-Python frontend gaps observed (all resolved)
 
 Building the `get_num_blocks` harness surfaced three further
 Python-frontend limitations in ESBMC 8.3.0. All filed upstream
-with minimal reproducers:
+with minimal reproducers, all merged on 2026-05-24, and all
+re-verified against the rebuilt binary (no error; real symbolic
+execution generating > 0 VCCs):
 
-1. **esbmc/esbmc#4745** — PEP 604 union on class attribute
-   (`self.x: int | None = None`) produces
-   `WARNING: Skipping attribute 'x' with unsupported annotation type`
-   then `ERROR: Attribute "x" not found` on access.
+| Issue | Title | Fix PR | Re-verified |
+|---|---|---|---|
+| [esbmc/esbmc#4745](https://github.com/esbmc/esbmc/issues/4745) | PEP 604 union on class attribute (`self.x: int \| None = None`) — `Skipping attribute` + `Attribute "x" not found` | [#4752](https://github.com/esbmc/esbmc/pull/4752) | ✅ ESBMC now models `int \| None` as a tagged union and explores both branches symbolically |
+| [esbmc/esbmc#4746](https://github.com/esbmc/esbmc/issues/4746) | `is not None` on `typing.Optional[int]` — `Unsupported comparison between pointer-backed and non-pointer values` | [#4754](https://github.com/esbmc/esbmc/pull/4754) | ✅ `is not None` on `Optional[int]` resolves cleanly |
+| [esbmc/esbmc#4747](https://github.com/esbmc/esbmc/issues/4747) | Class `__init__` default referencing a module-level name — `ESBMC_default_*` not in scope at call site | [#4751](https://github.com/esbmc/esbmc/pull/4751) | ✅ Sentinel defaults resolve at the call site |
 
-2. **esbmc/esbmc#4746** — `is not None` on `typing.Optional[int]`
-   errors with
-   `Unsupported comparison between pointer-backed and non-pointer values`.
-
-3. **esbmc/esbmc#4747** — Class `__init__` with default value
-   referencing a module-level name: the synthesized
-   `ESBMC_default_<Class>___init___<param>` is not in scope at
-   the call site. Literal defaults and plain-function defaults
-   work; only class `__init__` with a named default fails.
-
-A fourth issue, **esbmc/esbmc#4748** (to be filed), captures a
-slicer / reachability quirk observed while building
-`block_size_zero_cli_path.py`: tightening a precondition from
-`0 <= a` to `1 <= a` caused ESBMC to slice away the CWE-369
-division-by-zero VCC and report `VERIFICATION SUCCESSFUL` despite
-the divisor being permitted to be zero. Workaround in this PoC:
-keep the dividend precondition at `>= 0`. The reproducer is the
-git history of `harness/block_size_zero_cli_path.py`.
+A slicer / reachability quirk observed while building
+`block_size_zero_cli_path.py` (tightening a precondition from
+`0 <= a` to `1 <= a` once caused ESBMC to silently drop the
+CWE-369 division-by-zero VCC) is **no longer reproducible** on
+the rebuilt binary — both the loose and tight forms correctly
+report `FAILED` with the CWE-369 witness intact. Whatever bug
+caused the original observation has been incidentally fixed,
+either in the ESBMC merge train of 2026-05-24 or elsewhere; no
+issue is filed.
 
 ## 9. Live, CLI-reachable bug: `--block-size 0` crashes engine init
 
