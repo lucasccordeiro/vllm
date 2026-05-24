@@ -23,10 +23,12 @@ def main() -> None:
     x = nondet_int()
     y = nondet_int()
 
+    # Postcondition `r % y == 0` and `r - y < x` are non-linear in
+    # (x, y, r); use SMALL_BOUND (see stubs.py rationale).
     __ESBMC_assume(0 <= x)
-    __ESBMC_assume(x <= INT_BOUND)
+    __ESBMC_assume(x <= SMALL_BOUND)
     __ESBMC_assume(1 <= y)
-    __ESBMC_assume(y <= INT_BOUND)
+    __ESBMC_assume(y <= SMALL_BOUND)
 
     r = round_up(x, y)
 
