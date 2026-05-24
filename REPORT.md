@@ -375,26 +375,29 @@ witnesses.
 
 All verdicts below come from **real symbolic execution** — the
 methodology audit in §10 retired the previous vacuous-SUCCESSFUL
-results. VCC counts in the rightmost column confirm non-vacuity
-(every non-buggy entry has > 0 VCCs).
+results, and `verify.py` now enforces a hard guard
+(`FAIL (vacuous: 0 VCCs)`) so any future regression of this class
+is caught immediately. VCC counts in the rightmost column report
+the *Generated* number from ESBMC's BMC stage (pre-simplification);
+every non-buggy entry has > 0.
 
-| Target                     | Phase 1                       | Phase 2 (`--overflow-check`) | VCCs |
-|----------------------------|-------------------------------|------------------------------|------|
+| Target                     | Phase 1                       | Phase 2 (`--overflow-check`) | Phase 1 VCCs |
+|----------------------------|-------------------------------|------------------------------|--------------|
 | `cdiv`                     | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 3    |
-| `cdiv_buggy`               | FAILED (expected)             | skipped                      | 1    |
+| `cdiv_buggy`               | FAILED (expected)             | skipped                      | 3    |
 | `round_up`                 | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 5    |
-| `round_up_buggy`           | FAILED (expected)             | skipped                      | 1    |
+| `round_up_buggy`           | FAILED (expected)             | skipped                      | 5    |
 | `round_down`               | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 5    |
-| `round_down_buggy`         | FAILED (expected)             | skipped                      | 1    |
+| `round_down_buggy`         | FAILED (expected)             | skipped                      | 5    |
 | `get_num_blocks`           | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 8    |
-| `get_num_blocks_buggy`     | FAILED (expected)             | skipped                      | 1    |
+| `get_num_blocks_buggy`     | FAILED (expected)             | skipped                      | 4    |
 | `block_size_zero_cli_path` | **FAILED (live bug witness)** | skipped                      | 2    |
 | `next_power_of_2`          | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 5    |
 | `next_power_of_2_buggy`    | FAILED (expected)             | skipped                      | 5    |
-| `largest_power_of_2_divisor`       | SUCCESSFUL (expected) | SUCCESSFUL (expected)        | 6    |
-| `largest_power_of_2_divisor_buggy` | FAILED (expected)     | skipped                      | 6    |
+| `largest_power_of_2_divisor`       | SUCCESSFUL (expected) | SUCCESSFUL (expected)        | 39   |
+| `largest_power_of_2_divisor_buggy` | FAILED (expected)     | skipped                      | 39   |
 
-Wall-clock: ~66 s for `make verify` end-to-end on aarch64 macOS.
+Wall-clock: ~65 s for `make verify` end-to-end on aarch64 macOS.
 
 The four `*_power_of_2*` targets use loop reimplementations
 because ESBMC's Python frontend does not yet terminate on

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -139,13 +140,24 @@ def _verdict_from_output(out: str) -> str:
     return "ERROR"
 
 
-def _run_esbmc(entry: str, args: tuple[str, ...]) -> tuple[str, str]:
+# Match ESBMC's per-run VCC accounting line, e.g.:
+#   "Generated 3 VCC(s), 3 remaining after simplification (12 assignments)"
+_VCC_RE = re.compile(r"Generated (\d+) VCC\(s\)")
+
+
+def _vcc_count(out: str) -> int | None:
+    """Return the 'Generated N VCC(s)' integer, or None if absent."""
+    m = _VCC_RE.search(out)
+    return int(m.group(1)) if m else None
+
+
+def _run_esbmc(entry: str, args: tuple[str, ...]) -> tuple[str, int | None, str]:
     cmd = [ESBMC, *args, entry]
     proc = subprocess.run(
         cmd, capture_output=True, text=True, cwd=HARNESS_DIR
     )
     output = proc.stdout + proc.stderr
-    return _verdict_from_output(output), output[-400:]
+    return _verdict_from_output(output), _vcc_count(output), output[-400:]
 
 
 def _phase_label(phase: int) -> str:
@@ -164,13 +176,28 @@ def _run_target(target: Target, phases: tuple[int, ...]) -> int:
         if expected is None:
             print(f"  [{_phase_label(phase)}] skipped")
             continue
-        verdict, tail = _run_esbmc(target.entry, extra_args)
-        ok = verdict == expected
-        marker = "PASS" if ok else "FAIL"
+        verdict, vcc, tail = _run_esbmc(target.entry, extra_args)
+
+        # Vacuity guard (see RETROSPECTIVE.md Finding 1): a SUCCESSFUL
+        # verdict with 0 VCCs generated means the symbolic execution
+        # never reached any user-level assertion — the harness is
+        # passing vacuously and provides no real verification value.
+        vacuous = verdict == "SUCCESSFUL" and vcc == 0
+        ok = verdict == expected and not vacuous
+
+        if vacuous:
+            marker = "FAIL (vacuous: 0 VCCs)"
+        elif ok:
+            marker = "PASS"
+        else:
+            marker = "FAIL"
+
+        vcc_str = "?" if vcc is None else str(vcc)
         cmd_str = shlex.join((ESBMC, *extra_args, target.entry))
         print(
             f"  [{_phase_label(phase)}] {marker}: "
-            f"verdict={verdict} expected={expected}  ({cmd_str})"
+            f"verdict={verdict} vcc={vcc_str} expected={expected}  "
+            f"({cmd_str})"
         )
         if not ok:
             failures += 1
