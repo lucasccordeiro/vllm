@@ -108,6 +108,20 @@ TARGETS: list[Target] = [
         expected="FAILED",
         safety_expected=None,
     ),
+    Target(
+        # Third live-bug target: --hash-block-size -k (k >= 1)
+        # propagation. Adjacent failure mode to #43521. The
+        # resolver silently returns the negative value, which
+        # then causes request_block_hasher's loop to never
+        # terminate. Verified via ESBMC's unwinding-assertion:
+        # the loop body cannot fit within --unwind 6 when
+        # block_size < 0.
+        name="hash_block_size_negative_propagation",
+        entry="hash_block_size_negative_propagation.py",
+        esbmc_args=("--unwind", "6"),
+        expected="FAILED",
+        safety_expected=None,
+    ),
     # The next four targets use loop reimplementations of upstream's
     # bit-trick functions (see harness headers for the equivalence
     # argument). --unwind 32 covers the longest loop the

@@ -116,9 +116,47 @@ early-return at `kv_cache_utils.py:577` and are unaffected.
 2. ✅ Empirical reproduction confirms the static counterexample.
 3. ✅ Filed upstream as [vllm-project/vllm#43521](https://github.com/vllm-project/vllm/issues/43521) with both witnesses + the one-line fix proposal.
 
-### Follow-up (queued, not yet filed)
+### Adjacent failure mode — `--hash-block-size -k` (k ≥ 1): silent propagation → request_block_hasher infinite loop
 
-Adjacent failure mode `--hash-block-size -1` does not crash at line 628 (Python's `bs % -1 == 0` for any `bs ≥ 0`), so the negative value silently propagates to downstream consumers in `vllm/v1/core/kv_cache_coordinator.py:429-431` and `vllm/v1/kv_offload/base.py:363`. **Unverified.** Worth a separate harness + sandbox reproducer; if confirmed to cause silent data corruption (rather than crash later), file as a distinct issue. Tracked as a ROADMAP follow-up.
+**Confirmed and reproduced.** Different failure shape from Finding #2's headline `--hash-block-size 0` case:
+
+| | `--hash-block-size 0` (#43521) | `--hash-block-size -k` (this mode) |
+|---|---|---|
+| Engine startup | Crashes during config | **Succeeds** |
+| When user notices | Immediately at server boot | **First request hangs forever** |
+| Failure class | `ZeroDivisionError` | Infinite loop (+ unbounded `new_block_hashes` growth → OOM) |
+
+Trace:
+
+1. **Resolver** (`vllm/v1/core/kv_cache_utils.py:625-633`): with `requested = -1`, the validator predicate `any(bs % hash_block_size != 0 for bs in group_block_sizes)` is `False` for any `bs ≥ 0` (Python's `bs % -1 == 0`). The adjacent `ValueError` branch never fires. Resolver silently returns `hash_block_size = -1`.
+
+2. **Hasher construction** (`vllm/v1/engine/core.py:212`): `get_request_block_hasher(-1, ...)` is built at engine init.
+
+3. **First request hangs** (`vllm/v1/core/kv_cache_utils.py:660-680`): the closure's loop `while True: end_token_idx = start_token_idx + block_size; if end_token_idx > num_tokens: break; ...; start_token_idx += block_size` is non-terminating for any `block_size < 0` and `num_tokens ≥ 0` because `end_token_idx` decreases monotonically.
+
+ESBMC counterexample (harness `hash_block_size_negative_propagation.py`, `--unwind 6`):
+
+```
+Violated property:
+  file hash_block_size_negative_propagation.py line 65 column 4
+  function hasher_loop
+  unwinding assertion loop 133
+
+  block_size = -1
+  num_tokens = 4
+```
+
+Empirical sandbox reproduction (using the same `VLLM_TARGET_DEVICE=empty` install):
+
+```
+INFINITE LOOP confirmed: hasher did not terminate within 3 s
+```
+
+(`get_request_block_hasher(-1, ...)` called on a 4-token request; `signal.alarm(3)` fires.)
+
+Severity: same UX class as #43521 (CLI-supplied invalid value, internal failure mode) but harder to diagnose — server boots cleanly, then hangs on the first request, with `new_block_hashes` growing unboundedly. The same one-line fix proposed for #43521 (`if hash_block_size is not None and hash_block_size <= 0: raise ...`) closes this too.
+
+Filing decision: separate upstream issue (this section's analysis goes into the body) rather than a #43521 comment, because the failure modes are distinct enough that maintainers may want them tracked separately for triage and tests. Issue draft is prepared in the corresponding PR.
 
 ## Out of scope (this audit)
 
