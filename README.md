@@ -69,6 +69,9 @@ RETROSPECTIVE.md            # PoC retrospective: scope, findings,
 ROADMAP.md                  # forward plan: tiered target list with
                             # blockers, recommended sequence, end-state
                             # estimates, cross-cutting workstreams
+AUDIT.md                    # config-validation audit: SkipValidation[int]
+                            # fields enumerated and ranked for live-bug
+                            # potential (queues Tier 2 harnesses)
 ```
 
 Entry scripts use real `from stubs import …` (the previous
