@@ -392,7 +392,7 @@ every non-buggy entry has > 0.
 | `get_num_blocks`           | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 8    |
 | `get_num_blocks_buggy`     | FAILED (expected)             | skipped                      | 4    |
 | `block_size_zero_cli_path` | **FAILED (live bug witness)** | skipped                      | 2    |
-| `hash_block_size_zero_cli_path` | **FAILED (live bug witness)** | skipped                  | 2    |
+| `hash_block_size_zero_cli_path` | **FAILED (live bug witness, [vllm-project/vllm#43521](https://github.com/vllm-project/vllm/issues/43521))** | skipped                  | 2    |
 | `next_power_of_2`          | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 5    |
 | `next_power_of_2_buggy`    | FAILED (expected)             | skipped                      | 5    |
 | `largest_power_of_2_divisor`       | SUCCESSFUL (expected) | SUCCESSFUL (expected)        | 39   |
