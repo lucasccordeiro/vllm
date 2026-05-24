@@ -43,7 +43,7 @@ The `block_size_zero_cli_path` finding (issue #43496) demonstrated that **CLI pa
 | `--max-num-seqs 0` | `vllm/engine/arg_utils.py` → scheduler running list | minimal `SchedulerConfig` stub | Same family. |
 | `--gpu-memory-utilization` boundary | `vllm/config/cache.py:67` (`Field(gt=0, le=1)`) | none | Constraint *is* in place; verify it actually catches edge values (`0.0`, `1.0`, `nan`). Negative result acceptable. |
 | `--num-gpu-blocks-override 0` / `--num-gpu-blocks-override -1` | `vllm/v1/core/kv_cache_utils.py:898` (`may_override_num_blocks`) | none (we already stub this) | Override of `num_blocks` to `0` would crash `BlockPool.get_usage` (Tier 3). Likely live. |
-| `--hash-block-size 0` | `vllm/config/cache.py:54` → `vllm/v1/core/kv_cache_utils.py:625-633` | none | **Confirmed live** by audit (see [`AUDIT.md`](./AUDIT.md) Finding #2). `bs % hash_block_size` at line 631 crashes with CWE-369 before the existing `ValueError` branch can fire. Next harness in the queue. |
+| `--hash-block-size 0` | `vllm/config/cache.py:54` → `vllm/v1/core/kv_cache_utils.py:628` | none | ✅ **Shipped and empirically reproduced.** Harness `hash_block_size_zero_cli_path.py` produces the CWE-369 counterexample (`hash_block_size != 0`); the sandbox reproducer triggers the exact crash at line 628 of `resolve_kv_cache_block_sizes`. See [`AUDIT.md`](./AUDIT.md) Finding #2 and REPORT.md §5. Upstream issue filing in progress. |
 | `--block-size N` for prime / non-power-of-2 `N` | same as #43496 chain | none | The accepted bug fix (#43514) only enforces positivity, not the backend's `bs % 16 == 0`-style preference. Worth checking the downstream crash mode for accepted-but-suboptimal values. |
 
 ## Tier 3 — KV cache & block manager (new data-structure stubs)
@@ -109,7 +109,7 @@ Cumulative target count and approximate `make verify` wall-clock at each milesto
 
 | Milestone | Cumulative targets | Wall-clock | Live findings to date |
 |---|---|---|---|
-| End of Tier 1 (current) | 13 entries (7 unique functions/paths × buggy + non-buggy) | ~66 s | 1 (issue #43496) |
+| End of Tier 1 + Tier 2 audit + first Tier 2 harness (current) | 14 entries | ~75 s | **2** (issue #43496 + `hash_block_size` to file) |
 | End of Tier 2 audit + 2 CLI-path harnesses | +4 entries → 17 | ~90 s | 1–3 likely |
 | End of Tier 3 (all rows) | +8 entries → 25 | ~3–4 min | open |
 | End of Tier 4 | +6 entries → 31 | ~5–8 min (CI-relevant) | open |

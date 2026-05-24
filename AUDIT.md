@@ -32,7 +32,7 @@ Two `SkipValidation[int]` fields total. The rest are non-int and out of scope pe
 | # | Field | Severity | Status |
 |---|---|---|---|
 | 1 | `CacheConfig.block_size` | **Live, CLI-reachable** (filed: [vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496); candidate fix: [vllm-project/vllm#43514](https://github.com/vllm-project/vllm/pull/43514)) | Already shipped as the `block_size_zero_cli_path` target. Closes when #43514 merges. |
-| 2 | `CacheConfig.hash_block_size` | **Live, CLI-reachable** | New finding (this audit). Harness to follow as the next Tier 2 target. To be filed upstream once the harness produces the ESBMC counterexample. |
+| 2 | `CacheConfig.hash_block_size` | **Live, CLI-reachable, reproduced** | Harness `hash_block_size_zero_cli_path.py` ships in this PR; ESBMC counterexample matches an empirical sandbox crash at `vllm/v1/core/kv_cache_utils.py:628`. Upstream issue filing in progress. |
 
 ## Finding #1 — `CacheConfig.block_size`
 
@@ -81,12 +81,40 @@ if requested is not None and requested <= 0:
     )
 ```
 
+### Empirical reproduction
+
+Calling `resolve_kv_cache_block_sizes` directly with a hand-built
+multi-group config and `hash_block_size = 0` (against the same
+sandbox installation used for #43496) produces the exact crash:
+
+```
+Traceback (most recent call last):
+  ...
+  File "vllm/v1/core/kv_cache_utils.py", line 628,
+      in resolve_kv_cache_block_sizes
+    if any(bs % hash_block_size != 0 for bs in group_block_sizes):
+       ~~~^~~~~~~~~~~~~~~~~
+ZeroDivisionError: integer modulo by zero
+```
+
+The CacheConfig step is independently confirmed:
+
+```python
+from vllm.config.cache import CacheConfig
+c = CacheConfig(hash_block_size=0)
+assert c.hash_block_size == 0   # accepted silently
+```
+
+The path is reachable for **hybrid models with multiple KV cache
+groups** (e.g. Mamba+Attention) that have either prefix caching or
+a KV-transfer connector enabled. Single-group setups hit an
+early-return at `kv_cache_utils.py:577` and are unaffected.
+
 ### Next steps
 
-1. Build `harness/hash_block_size_zero_cli_path.py` mirroring the `block_size_zero_cli_path` shape: nondet `requested >= 0`, fixed `group_block_sizes = (b,)` with `b > 0`, evaluate `b % requested`. Phase 1 expected `FAILED` (CWE-369 witness).
-2. Run `make verify`; capture the ESBMC counterexample.
-3. Empirically reproduce by installing vLLM and running `LLM(model=..., hash_block_size=0)` (same `VLLM_TARGET_DEVICE=empty` route used for #43496).
-4. File upstream as `vllm-project/vllm` issue with the counterexample + traceback. Offer to PR the one-line fix.
+1. ✅ Harness shipped (`harness/hash_block_size_zero_cli_path.py`).
+2. ✅ Empirical reproduction confirms the static counterexample.
+3. File upstream as a `vllm-project/vllm` issue with both witnesses + the one-line fix proposal.
 
 ## Out of scope (this audit)
 
