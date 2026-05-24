@@ -11,10 +11,7 @@
 # Phase 2: --overflow-check; the b > 0 precondition rules out the
 #          ZeroDivisionError in the `a // -b` step.
 #
-# NOTE: this script assumes stubs.py has already been concatenated in
-# front of it (verify.py does this). No `import` is performed; the
-# Pyright "undefined name" diagnostics on the line below are expected.
-# pyright: reportUndefinedVariable=false
+from stubs import nondet_int, __ESBMC_assume, SMALL_BOUND
 
 
 def cdiv(a: int, b: int) -> int:

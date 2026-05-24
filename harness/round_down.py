@@ -10,7 +10,7 @@
 # Phase 1: with y > 0, result is the largest multiple of y with r <= x.
 # Phase 2: with y > 0, the only division site is guarded against
 #          ZeroDivisionError.
-# pyright: reportUndefinedVariable=false
+from stubs import nondet_int, __ESBMC_assume, SMALL_BOUND
 
 
 def round_down(x: int, y: int) -> int:

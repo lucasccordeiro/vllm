@@ -18,7 +18,8 @@
 # `group_size > 0` but does NOT assert `page_size > 0`).
 #
 # Expected Phase-2 verdict: skipped (Phase-1 already FAILED).
-# pyright: reportUndefinedVariable=false
+
+from stubs import nondet_int, __ESBMC_assume, INT_BOUND, may_override_num_blocks
 
 
 def get_num_blocks(

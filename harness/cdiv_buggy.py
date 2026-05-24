@@ -10,10 +10,7 @@
 #   Phase 1 (default flags):    FAILED   (ZeroDivisionError reachable)
 #   Phase 2 (--overflow-check): skipped  (Phase 1 already FAILED)
 #
-# NOTE: this script assumes stubs.py has already been concatenated in
-# front of it. No `import` is performed; the Pyright "undefined name"
-# diagnostics on the lines below are expected.
-# pyright: reportUndefinedVariable=false
+from stubs import nondet_int, __ESBMC_assume, INT_BOUND
 
 
 def cdiv(a: int, b: int) -> int:

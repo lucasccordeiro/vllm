@@ -11,7 +11,7 @@
 # Phase 2: with y > 0, the only division site (`(x + y - 1) // y`) is
 #          guarded against ZeroDivisionError, and the intermediate
 #          `x + y - 1` does not overflow within the [0, 2^30] window.
-# pyright: reportUndefinedVariable=false
+from stubs import nondet_int, __ESBMC_assume, SMALL_BOUND
 
 
 def round_up(x: int, y: int) -> int:
