@@ -66,6 +66,9 @@ REPORT.md                   # progress report (per-target verification)
 RETROSPECTIVE.md            # PoC retrospective: scope, findings,
                             # filed issues, audit incidents, patterns
                             # carrying forward (AWS-Neuron style)
+ROADMAP.md                  # forward plan: tiered target list with
+                            # blockers, recommended sequence, end-state
+                            # estimates, cross-cutting workstreams
 ```
 
 Entry scripts use real `from stubs import …` (the previous
