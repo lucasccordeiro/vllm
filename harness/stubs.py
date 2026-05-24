@@ -1,33 +1,38 @@
 # SPDX-License-Identifier: Apache-2.0
 # Canonical stub library for the vLLM ESBMC-Python PoC.
 #
-# This file is **concatenated** in front of every entry script in
-# harness/ by verify.py before invoking ESBMC. The model is identical
+# Imported by every entry script in harness/. The model is identical
 # to the AWS-Neuron PoC: edit only this file to change a stub
-# contract; verify.py regenerates the build artefacts under build/.
-#
-# Why concatenation rather than `import`? ESBMC's Python frontend
-# (as of 8.3.0) does not propagate module-level constants imported
-# from another file to inner function scopes. Concatenation sidesteps
-# the issue and keeps stubs.py the single source of truth.
+# contract.
 #
 # Philosophy:
 #   - Model only what a target *reads*. Do not invent behaviour.
 #   - Preconditions are `__ESBMC_assume(...)`. Postconditions are
 #     plain `assert ...`.
 #
-# **DO NOT** add placeholder Python definitions for `nondet_int` or
-# `__ESBMC_assume`. Those names are ESBMC-Python intrinsics; defining
-# them as Python functions causes ESBMC to use the Python definition
-# (e.g. `return 0` for nondet_int), which makes the symbolic value a
+# **DO NOT** define `nondet_int` or `__ESBMC_assume` as runtime
+# Python functions in this file. Those names are ESBMC-Python
+# intrinsics; a runtime def causes ESBMC to use the Python body
+# (e.g. `return 0` for nondet_int), making the symbolic value a
 # concrete constant, the precondition `__ESBMC_assume(...)` a no-op,
 # and the rest of the harness vacuous. Every `assert` then gets
 # sliced and ESBMC silently reports VERIFICATION SUCCESSFUL with 0
-# VCCs generated. This was the methodology bug fixed in commit
-# <see fix/stubs-shadowing-intrinsics>. The harness files therefore
-# rely on ESBMC alone to provide these symbols; running them under
-# CPython will raise NameError (intentional — CPython sanity is
-# out of scope for this verifier-only PoC).
+# VCCs generated. Surfaced and fixed as RETROSPECTIVE.md Finding 1.
+#
+# The `TYPE_CHECKING`-guarded declarations below give Pyright the
+# type information it needs without putting any executable code in
+# ESBMC's path: `TYPE_CHECKING` is False at runtime, so the bodies
+# are unreachable and ESBMC keeps the intrinsic resolution.
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # ESBMC-Python intrinsics. Declared only for static type checkers
+    # (Pyright). ESBMC provides the symbols at verification time;
+    # CPython will raise NameError at import time (intentional —
+    # the harness files are verifier-only).
+    def nondet_int() -> int: ...
+    def __ESBMC_assume(_c: bool) -> None: ...  # noqa: N802
 
 # --- Concrete bounds used by entry scripts -------------------------
 #

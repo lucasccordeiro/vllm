@@ -22,8 +22,6 @@ from dataclasses import dataclass
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 HARNESS_DIR = os.path.join(ROOT, "harness")
-BUILD_DIR = os.path.join(ROOT, "build")
-STUBS_PATH = os.path.join(HARNESS_DIR, "stubs.py")
 ESBMC = os.environ.get("ESBMC", "esbmc")
 
 # Phase-2 base flag set. Targets may append their own.
@@ -109,26 +107,10 @@ def _verdict_from_output(out: str) -> str:
     return "ERROR"
 
 
-def _build_artefact(entry: str) -> str:
-    """Concatenate stubs.py + entry script into build/<entry>."""
-    os.makedirs(BUILD_DIR, exist_ok=True)
-    with open(STUBS_PATH, encoding="utf-8") as f:
-        stubs = f.read()
-    with open(os.path.join(HARNESS_DIR, entry), encoding="utf-8") as f:
-        body = f.read()
-    out_path = os.path.join(BUILD_DIR, entry)
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(stubs)
-        f.write("\n# --- entry script ---\n")
-        f.write(body)
-    return out_path
-
-
 def _run_esbmc(entry: str, args: tuple[str, ...]) -> tuple[str, str]:
-    artefact = _build_artefact(entry)
-    cmd = [ESBMC, *args, os.path.basename(artefact)]
+    cmd = [ESBMC, *args, entry]
     proc = subprocess.run(
-        cmd, capture_output=True, text=True, cwd=BUILD_DIR
+        cmd, capture_output=True, text=True, cwd=HARNESS_DIR
     )
     output = proc.stdout + proc.stderr
     return _verdict_from_output(output), output[-400:]

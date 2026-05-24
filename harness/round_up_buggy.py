@@ -8,7 +8,7 @@
 # Expected verdicts:
 #   Phase 1: FAILED   (ZeroDivisionError reachable)
 #   Phase 2: skipped
-# pyright: reportUndefinedVariable=false
+from stubs import nondet_int, __ESBMC_assume, INT_BOUND
 
 
 def round_up(x: int, y: int) -> int:

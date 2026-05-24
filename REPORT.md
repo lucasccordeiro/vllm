@@ -159,28 +159,24 @@ AWS-Neuron REPORT.md:
   (block counts, token counts, page sizes). Bigint corner cases
   outside `[0, 2^30]` are not covered.
 
-## 4. ESBMC-Python limitation observed
+## 4. ESBMC-Python limitations observed and retired
 
-The Python frontend in ESBMC 8.3.0 does not propagate module-level
-non-callable constants through `from <module> import <CONST>` to an
-inner function's scope. Concrete failure mode:
+All four frontend gaps observed during this session have been
+filed and **fixed upstream**. The PoC has been refactored to use
+the upstream-supported forms; no workarounds remain in the
+checked-in code. Full chronological detail in
+[`RETROSPECTIVE.md`](./RETROSPECTIVE.md) (*Upstream issues filed*
+and *Source-rewriting history*).
 
-```
-from stubs import nondet_int, __ESBMC_assume, INT_BOUND
-def main():
-    x = nondet_int()
-    __ESBMC_assume(x <= INT_BOUND)   # ERROR: 'INT_BOUND' is not defined
-```
+| Issue | Title (abbrev.) | Fix PR | Workaround retired |
+|---|---|---|---|
+| [esbmc/esbmc#4744](https://github.com/esbmc/esbmc/issues/4744) | "Module-level constants dropped on selective import" | [#4749](https://github.com/esbmc/esbmc/pull/4749) | Concatenation hack in `verify.py` dropped; entry scripts now use `from stubs import nondet_int, __ESBMC_assume, INT_BOUND` directly. |
+| [esbmc/esbmc#4745](https://github.com/esbmc/esbmc/issues/4745) | "PEP 604 `int \| None` class attr silently skipped" | [#4752](https://github.com/esbmc/esbmc/pull/4752) | Opaque-`vllm_config` stub no longer required for `int \| None` fields (when future targets need real `VllmConfig` modelling). |
+| [esbmc/esbmc#4746](https://github.com/esbmc/esbmc/issues/4746) | "`is not None` on `Optional[int]` errors 'pointer-backed vs non-pointer'" | [#4754](https://github.com/esbmc/esbmc/pull/4754) | Same — paired with #4745 above. |
+| [esbmc/esbmc#4747](https://github.com/esbmc/esbmc/issues/4747) | "Class `__init__` default referencing module-level name: `ESBMC_default_*` not in scope" | [#4751](https://github.com/esbmc/esbmc/pull/4751) | Sentinel-default fields are now usable directly when future targets need them. |
 
-Workaround in this PoC: concatenate `harness/stubs.py` in front of
-each entry script in a generated `build/` artefact, exactly as the
-AWS-Neuron PoC does. This is the convention going forward.
-
-Filed upstream: **esbmc/esbmc#4744** —
-*[python-frontend] Module-level constants are dropped when imported
-alongside functions from the same module*
-(`https://github.com/esbmc/esbmc/issues/4744`). Concatenation
-remains the working workaround.
+The PoC's local ESBMC binary is rebuilt at or after the
+`#4754` merge (master commit `7d434cc303`, 2026-05-24).
 
 ## 7. Latent precondition in `get_num_blocks` (defensive, not live)
 
@@ -445,8 +441,11 @@ Override the ESBMC binary location:
 make verify ESBMC=/path/to/esbmc
 ```
 
-Generated artefacts (concatenated stubs + entry) land under
-`build/` and are git-ignored.
+Entry scripts are passed to ESBMC directly from `harness/`;
+no build/concatenation step is needed since
+[esbmc/esbmc#4749](https://github.com/esbmc/esbmc/pull/4749)
+landed (`from stubs import …` works for both constants and
+intrinsics).
 
 ## 10. Methodology audit
 

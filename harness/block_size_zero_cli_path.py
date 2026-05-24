@@ -29,7 +29,7 @@
 # invocation `vllm serve --block-size 0`.
 #
 # Phase 2 skipped — Phase 1 already FAILED.
-# pyright: reportUndefinedVariable=false
+from stubs import nondet_int, __ESBMC_assume, INT_BOUND
 
 
 def cdiv(a: int, b: int) -> int:
