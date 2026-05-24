@@ -206,6 +206,8 @@ Each item is queued as a follow-up Tier 2 harness in [`ROADMAP.md`](./ROADMAP.md
 
 ## Finding #3 — `--max-model-len 0` silent negative-num_new_tokens propagation
 
+**Filed**: [vllm-project/vllm#43532](https://github.com/vllm-project/vllm/issues/43532) (open, labelled `bug`).
+
 ### Trace
 
 1. **CLI** (`vllm/engine/arg_utils.py:802`): `--max-model-len` is wired to `ModelConfig.max_model_len`. Field declared `int = Field(default=None, ge=-1)`; `ge=-1` is the "auto-derive" sentinel and `0` is admitted.
