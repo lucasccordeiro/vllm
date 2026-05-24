@@ -62,7 +62,10 @@ harness/
   block_size_zero_cli_path.py # CLI path: --block-size 0            (FAILED, LIVE BUG)
 verify.py                   # manifest + two-phase driver
 Makefile                    # make verify / phase1 / phase2 / verify-only
-REPORT.md                   # progress report
+REPORT.md                   # progress report (per-target verification)
+RETROSPECTIVE.md            # PoC retrospective: scope, findings,
+                            # filed issues, audit incidents, patterns
+                            # carrying forward (AWS-Neuron style)
 build/                      # generated artefacts (git-ignored)
 ```
 

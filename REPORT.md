@@ -448,72 +448,12 @@ make verify ESBMC=/path/to/esbmc
 Generated artefacts (concatenated stubs + entry) land under
 `build/` and are git-ignored.
 
-## 10. Methodology audit — vacuous SUCCESSFUL caused by stub shadowing
+## 10. Methodology audit
 
-While building target #3 (`next_power_of_2` / `largest_power_of_2_divisor`),
-spot-checking the VCC count under `--no-slice` revealed that
-**every prior non-buggy `SUCCESSFUL` verdict had been vacuous** —
-ESBMC reported `Generated 0 VCC(s)` and the slicer removed every
-assertion before any solver was invoked.
-
-### Root cause
-
-`harness/stubs.py` previously contained Python placeholder
-definitions for the ESBMC intrinsics:
-
-```python
-def nondet_int() -> int:
-    return 0
-
-def __ESBMC_assume(_c: bool) -> None:
-    return None
-```
-
-The intent was that ESBMC would override these at parse time and
-that CPython could still import the file for sanity. In practice
-ESBMC's Python frontend **uses the Python definition** when one
-is present — so `n = nondet_int()` became `n = 0` (a concrete
-constant), every `__ESBMC_assume(...)` became a no-op, the
-postconditions became reachable only on the trivial concrete
-path, the slicer removed the asserts, and ESBMC happily reported
-`VERIFICATION SUCCESSFUL` with 0 VCCs.
-
-The buggy variants of `cdiv`, `round_up`, `round_down`,
-`get_num_blocks`, and `block_size_zero_cli_path` correctly
-reported `FAILED` **for an unrelated reason**: ESBMC emits an
-implicit CWE-369 division-by-zero VCC on every `//` operation
-regardless of user code. That VCC fired on the buggy variants
-(which all introduce a reachable `// b` with `b == 0`) but had
-nothing to do with the user-level postconditions.
-
-### Fix
-
-Remove the placeholder definitions from `stubs.py`. ESBMC then
-recognises `nondet_int` and `__ESBMC_assume` as intrinsics and
-performs real symbolic execution. CPython direct execution of
-harness files is no longer supported (intentional — verifier-only
-PoC).
-
-### Side adjustment: bound tightening
-
-With real symbolic execution, postconditions involving non-linear
-arithmetic in symbolic inputs (e.g. `q * b >= a` where
-`q = -(a // -b)`) became intractable at the original
-`INT_BOUND = 2^30`. A new `SMALL_BOUND = 2^10` is introduced in
-`stubs.py` for these targets; it covers all realistic vLLM call
-sites (block-table arithmetic is well under 1024) and keeps each
-target under a few seconds. Targets whose postcondition is the
-implicit CWE-369 check (i.e. all `*_buggy` entries and
-`block_size_zero_cli_path`) keep `INT_BOUND` because Bitwuzla
-solves those in milliseconds.
-
-### Impact on prior findings
-
-- The **`--block-size 0` upstream finding (#43496)** is
-  unaffected: the FAILED verdict is from the implicit CWE-369
-  check, and the empirical end-to-end reproduction in §9
-  independently confirms the crash.
-- The **`get_num_blocks` latent-precondition finding (§7)** is
-  also unaffected, for the same reason.
-- All non-buggy `SUCCESSFUL` verdicts are now backed by real
-  VCCs (see §5 verdict table).
+Moved to [`RETROSPECTIVE.md`](./RETROSPECTIVE.md) (*Stub-correctness
+and methodology incidents → Finding 1*). The audit covers the
+vacuous-`SUCCESSFUL` stub-shadowing bug, its root cause, fix,
+and side adjustment to precondition bounds. See also the
+**Verification patterns worth carrying forward** section of
+`RETROSPECTIVE.md` for the VCC-count spot check that should be
+applied to every new target.
