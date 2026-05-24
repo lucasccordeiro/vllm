@@ -37,13 +37,13 @@ The `block_size_zero_cli_path` finding (issue #43496) demonstrated that **CLI pa
 
 | Target / parameter | Source | New stubs | Blockers / notes |
 |---|---|---|---|
-| Audit of all `SkipValidation[int]` fields | `vllm/config/*.py` | none | Static recon: enumerate every `SkipValidation` field; classify by whether a `gt=0`/`ge=0`/range constraint is implied by downstream use. |
+| ~~Audit of all `SkipValidation[int]` fields~~ | `vllm/config/*.py` | none | ✅ Shipped as [`AUDIT.md`](./AUDIT.md). Two fields enumerated; one already filed (#43496), the other (`hash_block_size`) confirmed as a second live, CLI-reachable bug of the same shape. |
 | `--max-model-len 0` | `vllm/engine/arg_utils.py` → `kv_cache_interface.max_memory_usage_bytes` | none | Likely caught by Pydantic constraints; verify. |
 | `--max-num-batched-tokens 0` | `vllm/engine/arg_utils.py` → `vllm/v1/core/sched/scheduler.py` (token-budget loop) | minimal `SchedulerConfig` stub | High blast radius if validator gap exists; touches the flagship scheduler target. |
 | `--max-num-seqs 0` | `vllm/engine/arg_utils.py` → scheduler running list | minimal `SchedulerConfig` stub | Same family. |
 | `--gpu-memory-utilization` boundary | `vllm/config/cache.py:67` (`Field(gt=0, le=1)`) | none | Constraint *is* in place; verify it actually catches edge values (`0.0`, `1.0`, `nan`). Negative result acceptable. |
 | `--num-gpu-blocks-override 0` / `--num-gpu-blocks-override -1` | `vllm/v1/core/kv_cache_utils.py:898` (`may_override_num_blocks`) | none (we already stub this) | Override of `num_blocks` to `0` would crash `BlockPool.get_usage` (Tier 3). Likely live. |
-| `--hash-block-size 0` | `vllm/config/cache.py:54` (`SkipValidation[int] | None`) | none | Reaches the prefix-cache hash-block divisibility assertion; non-positive probably crashes earlier. |
+| `--hash-block-size 0` | `vllm/config/cache.py:54` → `vllm/v1/core/kv_cache_utils.py:625-633` | none | **Confirmed live** by audit (see [`AUDIT.md`](./AUDIT.md) Finding #2). `bs % hash_block_size` at line 631 crashes with CWE-369 before the existing `ValueError` branch can fire. Next harness in the queue. |
 | `--block-size N` for prime / non-power-of-2 `N` | same as #43496 chain | none | The accepted bug fix (#43514) only enforces positivity, not the backend's `bs % 16 == 0`-style preference. Worth checking the downstream crash mode for accepted-but-suboptimal values. |
 
 ## Tier 3 — KV cache & block manager (new data-structure stubs)
@@ -96,7 +96,7 @@ These targets need the first non-trivial stubs in the PoC: a `KVCacheBlock` data
 
 1. ~~**Tier 1**: `next_power_of_2` + `largest_power_of_2_divisor`~~ — shipped, [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756) filed.
 2. ~~**Methodology**: VCC-count assertion in `verify.py`~~ — shipped.
-3. **Tier 2 audit** of `SkipValidation[int]` fields: static recon only, ~1 hour. Produces a list of CLI-path harness candidates with rough live-bug likelihood. Could surface a second bug like `--block-size 0`.
+3. ~~**Tier 2 audit** of `SkipValidation[int]` fields~~ — shipped as [`AUDIT.md`](./AUDIT.md). Second live bug confirmed (`hash_block_size`).
 4. **Tier 2 harnesses** for the top one or two candidates from the audit, one per session.
 5. **Tier 3, row 1** (`BlockPool.get_usage`): quick sanity check on `num_gpu_blocks == 0` → CWE-369. ~1 hour.
 6. **Tier 3, rows 2–3** (`popleft_n` / `append_n`): first real data-structure stub. ~half a day. The doubly-linked-list-at-K-nodes pattern then unlocks rows 4–5.
