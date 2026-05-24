@@ -62,9 +62,9 @@ Already documented as a shipped target. See [`REPORT.md` §9](./REPORT.md) and [
 
 4. **Downstream consumers** of the resolver's `hash_block_size` (`vllm/v1/core/kv_cache_coordinator.py:429-431`, `vllm/v1/kv_offload/base.py:363`): each performs a `%`-against-`hash_block_size`. If by any path a non-positive value escaped the resolver, they would crash too — but step 3 is the first crash site for the `--hash-block-size 0` input.
 
-### Adjacent failure mode: `--hash-block-size -1`
+### Adjacent failure mode: `--hash-block-size <negative>`
 
-`bs % -1` is well-defined in Python (`x % -1 == 0` for all `x ≥ 0`), so the validator's `any(...)` predicate is `False` for every group, and the resolver returns `hash_block_size = -1`. The negative value then flows into downstream consumers; whether each one crashes or silently corrupts the prefix-cache key computation depends on follow-up `%` and `//` semantics with a negative divisor. Worth covering in the harness but lower severity.
+Confirmed and reproduced as a separate live finding; analysis, ESBMC counterexample, and sandbox reproducer are below in *Adjacent failure mode — `--hash-block-size -k` (k ≥ 1)*.
 
 ### Severity
 

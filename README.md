@@ -60,6 +60,16 @@ harness/
   get_num_blocks.py         # vllm/v1/core/kv_cache_utils.py:935    (non-buggy)
   get_num_blocks_buggy.py   #   latent precondition probe           (FAILED)
   block_size_zero_cli_path.py # CLI path: --block-size 0            (FAILED, LIVE BUG)
+  hash_block_size_zero_cli_path.py
+                            # CLI path: --hash-block-size 0         (FAILED, LIVE BUG)
+  hash_block_size_negative_propagation.py
+                            # CLI path: --hash-block-size -k        (FAILED, LIVE BUG)
+  next_power_of_2.py        # vllm/utils/math_utils.py:15           (non-buggy, loop model)
+  next_power_of_2_buggy.py  #   off-by-one variant                  (FAILED)
+  largest_power_of_2_divisor.py
+                            # vllm/utils/math_utils.py:30           (non-buggy, loop model)
+  largest_power_of_2_divisor_buggy.py
+                            #   flipped termination condition       (FAILED)
 verify.py                   # manifest + two-phase driver
 Makefile                    # make verify / phase1 / phase2 / verify-only
 REPORT.md                   # progress report (per-target verification)

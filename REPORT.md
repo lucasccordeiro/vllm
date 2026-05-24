@@ -64,6 +64,10 @@ engine. Structure mirrors the AWS-Neuron NKI PoC (see
 | 3 | `vllm.utils.math_utils.round_down` | `vllm/utils/math_utils.py:25` |
 | 4 | `vllm.v1.core.kv_cache_utils.get_num_blocks` | `vllm/v1/core/kv_cache_utils.py:935` |
 | 5 | `--block-size 0` CLI path | `vllm/engine/arg_utils.py` → `vllm/v1/kv_cache_interface.py:218` |
+| 6 | `vllm.utils.math_utils.next_power_of_2` | `vllm/utils/math_utils.py:15` (loop reimpl; ESBMC `bit_length` gap is [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756)) |
+| 7 | `vllm.utils.math_utils.largest_power_of_2_divisor` | `vllm/utils/math_utils.py:30` (loop reimpl; same blocker as #6) |
+| 8 | `--hash-block-size 0` CLI path | `vllm/engine/arg_utils.py` → `vllm/v1/core/kv_cache_utils.py:628` |
+| 9 | `--hash-block-size -k` propagation | `vllm/v1/core/kv_cache_utils.py:660-680` (first-request infinite loop in `request_block_hasher`) |
 
 Targets 1–3 are pure integer helpers with explicit preconditions;
 both the non-buggy and buggy entries are toy contracts that
@@ -73,10 +77,17 @@ Target 4 is the first real-call-site target. Reachability analysis
 (§7) classifies its `*_buggy` counterexample as a latent /
 defensive-invariant gap, not a live bug.
 
-Target 5 is the first **live, CLI-reachable** finding (§9). Unlike
-target 4's buggy variant, target 5's preconditions faithfully model
-what the upstream argument-parsing and config-validation chain
-permits. The FAILED Phase-1 verdict is a counterexample for a real
+Targets 6–7 use loop reimplementations because ESBMC's Python
+frontend does not terminate on `int.bit_length()` over symbolic
+input ([esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756));
+the loop equivalence to upstream is by case analysis for n in
+[1, 2^30] (see each harness header).
+
+Targets 5, 8, and 9 are **live, CLI-reachable** findings (§9 and
+[`AUDIT.md`](./AUDIT.md) Finding #2). Unlike target 4's buggy
+variant, their preconditions faithfully model what the upstream
+argument-parsing and config-validation chain permits. The FAILED
+Phase-1 verdict is a counterexample for a real
 defect.
 
 ## 2. What is verified

@@ -110,7 +110,7 @@ Cumulative target count and approximate `make verify` wall-clock at each milesto
 
 | Milestone | Cumulative targets | Wall-clock | Live findings to date |
 |---|---|---|---|
-| End of Tier 1 + Tier 2 audit + first Tier 2 harness (current) | 14 entries | ~75 s | **2** (issue #43496 + `hash_block_size` to file) |
+| End of Tier 1 + Tier 2 audit + first two Tier 2 harnesses (current) | 15 entries | ~70 s | **3** (filed: #43496 + #43521; queued: `--hash-block-size -k` propagation, draft comment for #43521 ready to paste) |
 | End of Tier 2 audit + 2 CLI-path harnesses | +4 entries → 17 | ~90 s | 1–3 likely |
 | End of Tier 3 (all rows) | +8 entries → 25 | ~3–4 min | open |
 | End of Tier 4 | +6 entries → 31 | ~5–8 min (CI-relevant) | open |
