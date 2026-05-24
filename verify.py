@@ -134,6 +134,17 @@ TARGETS: list[Target] = [
         expected="FAILED",
         safety_expected=None,
     ),
+    Target(
+        # Fifth live-bug candidate from the broader audit:
+        # --num-gpu-blocks-override 0 CLI path. CacheConfig accepts
+        # any int; may_override_num_blocks replaces the profiled
+        # value with the override; BlockPool.__init__ asserts
+        # num_gpu_blocks > 0 -- bare AssertionError, no message.
+        name="num_gpu_blocks_override_zero_cli_path",
+        entry="num_gpu_blocks_override_zero_cli_path.py",
+        expected="FAILED",
+        safety_expected=None,
+    ),
     # The next four targets use loop reimplementations of upstream's
     # bit-trick functions (see harness headers for the equivalence
     # argument). --unwind 32 covers the longest loop the

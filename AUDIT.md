@@ -197,7 +197,7 @@ These are set from model config / engine state, not directly by the user, but th
 
 ### Priority for harness work
 
-1. **`--num-gpu-blocks-override 0` / negative** — easiest harness (we already model `may_override_num_blocks`); confirms the assertion path. Low-novelty: assertion failure rather than `ZeroDivisionError`. **Likely live**.
+1. ~~**`--num-gpu-blocks-override 0` / negative**~~ — ✅ **Shipped and confirmed live** (this commit). Harness `harness/num_gpu_blocks_override_zero_cli_path.py`; ESBMC counterexample at `num_gpu_blocks_override = 0` with `profiled = 1` → `num_blocks = 0` → `assert num_blocks > 0` fires. Empirical chain (`CacheConfig(num_gpu_blocks_override=0).num_gpu_blocks_override == 0`; `may_override_num_blocks(_, 4096) → 0`; `BlockPool(num_gpu_blocks=0) → AssertionError`) confirms. Detailed write-up in Finding #4 below.
 2. ~~**`--max-model-len 0`**~~ — ✅ **Shipped and confirmed live** (this commit). Harness `harness/max_model_len_zero_cli_path.py`; ESBMC counterexample at `max_model_len = 0, num_computed_tokens = 0, num_new_tokens = 1` produces `num_new_tokens = -1` at scheduler.py:397. Empirical chain (`_get_and_verify_max_len(0) = 0`; `min(1, -1) = -1`; `cdiv(-1, 16) = 0`) confirms the silent propagation. Detailed write-up in §3 below.
 3. `--max-logprobs` negative — easy to harness; smaller blast radius.
 4. `--long-prefill-token-threshold` negative — model is small but the guard is suggestive of a "treat 0 as off" intent that negatives slip past.
@@ -277,6 +277,98 @@ Tighten the Field constraint from `ge=-1` to a more specific predicate. Two natu
    ```
 
 2. **Two-sided constraint**: replace `ge=-1` with an explicit "must be positive or exactly -1" check; `Field(ge=-1, ne=0)` if Pydantic supports it (it doesn't out of the box; need the validator).
+
+## Finding #4 — `--num-gpu-blocks-override 0` / negative → bare `AssertionError` in `BlockPool.__init__`
+
+### Trace
+
+1. **CLI** (`vllm/engine/arg_utils.py:1126`): `--num-gpu-blocks-override` is wired to `CacheConfig.num_gpu_blocks_override`. Field is `int | None = None`, no `Field(gt=0)` constraint; argparse accepts any int.
+
+2. **CacheConfig accepts** (`vllm/config/cache.py:85`): no field-level validator. `CacheConfig(num_gpu_blocks_override=0)` returns silently with `num_gpu_blocks_override == 0`.
+
+3. **Override path** (`vllm/v1/core/kv_cache_utils.py:898`, `may_override_num_blocks`):
+
+   ```python
+   def may_override_num_blocks(vllm_config, num_blocks):
+       if vllm_config.cache_config.num_gpu_blocks_override is not None:
+           num_blocks = vllm_config.cache_config.num_gpu_blocks_override
+       return num_blocks
+   ```
+
+   For any positive profiled `num_blocks`, the override (= 0) wins — the function returns `0`.
+
+4. **BlockPool constructor** (`vllm/v1/core/block_pool.py:157`):
+
+   ```python
+   assert isinstance(num_gpu_blocks, int) and num_gpu_blocks > 0
+   ```
+
+   Bare `AssertionError` with **no message**. User sees an internal traceback pointing at this line, not a clean `ValueError("num_gpu_blocks_override must be positive")`.
+
+### ESBMC counterexample
+
+Phase 1, `vcc=1`, FAILED:
+
+```
+Violated property:
+  file harness/num_gpu_blocks_override_zero_cli_path.py line ... function main
+  assertion num_blocks > 0
+
+  user_override = 0
+  profiled = 1
+```
+
+### Empirical reproduction
+
+```python
+from vllm.config.cache import CacheConfig
+from vllm.v1.core.kv_cache_utils import may_override_num_blocks
+from vllm.v1.core.block_pool import BlockPool
+from unittest.mock import MagicMock
+
+# Step 1: CacheConfig accepts 0 (and -1) silently.
+assert CacheConfig(num_gpu_blocks_override=0).num_gpu_blocks_override == 0
+assert CacheConfig(num_gpu_blocks_override=-1).num_gpu_blocks_override == -1
+
+# Step 2: may_override_num_blocks replaces a positive profiled
+# value with the override.
+vllm_cfg = MagicMock()
+vllm_cfg.cache_config = CacheConfig(num_gpu_blocks_override=0)
+assert may_override_num_blocks(vllm_cfg, num_blocks=4096) == 0
+
+# Step 3: BlockPool constructor asserts.
+try:
+    BlockPool(num_gpu_blocks=0, enable_caching=False, hash_block_size=16)
+    raise RuntimeError("expected AssertionError")
+except AssertionError:
+    pass  # bare AssertionError; no useful message
+```
+
+### Severity
+
+Lowest of the four live findings. The user sees an internal `AssertionError` pointing at `block_pool.py:157` — informative enough that a careful user can deduce the `--num-gpu-blocks-override` value is bad. UX defect but loud and locally diagnosable.
+
+### Proposed fix
+
+Replace the bare assertion with an early validator on `CacheConfig`. Two natural shapes:
+
+1. **Field-level** — add a `field_validator` on `CacheConfig.num_gpu_blocks_override` matching the proposed shape for `max_model_len` (#43532) and for `block_size`/`hash_block_size` (#43514's pattern):
+
+   ```python
+   @field_validator("num_gpu_blocks_override", mode="after")
+   @classmethod
+   def _check_positive_or_none(cls, v):
+       if v is not None and v <= 0:
+           raise ValueError(
+               f"num_gpu_blocks_override must be a positive integer "
+               f"or None (no override), got {v}."
+           )
+       return v
+   ```
+
+2. **Constructor-level** — replace the bare `assert` in `BlockPool.__init__` with a `raise ValueError(...)` carrying a descriptive message. Faster to land but only improves the diagnostic; doesn't prevent the engine from getting this far.
+
+(1) is preferred because it short-circuits the bad config at construction time, mirroring the pattern in #43514 / proposed for #43521 and #43532.
 
 ## Out of scope (this audit)
 
