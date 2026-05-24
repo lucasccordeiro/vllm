@@ -15,21 +15,20 @@ Pinned upstream: `vllm-project/vllm @ 4438b6e7d`. Verifier: ESBMC 8.3.0+ (post-#
 | `round_down` | `vllm/utils/math_utils.py:25` | ✅ Phase 1 + 2 SUCCESSFUL (5 VCCs) |
 | `get_num_blocks` | `vllm/v1/core/kv_cache_utils.py:935` | ✅ Phase 1 + 2 SUCCESSFUL (8 VCCs); latent precondition documented |
 | `--block-size 0` CLI path | `vllm/engine/arg_utils.py:1117` → `vllm/v1/kv_cache_interface.py:218` | ✅ Phase 1 FAILED (live bug witness, vllm-project/vllm#43496, candidate fix #43514) |
-| `next_power_of_2` | `vllm/utils/math_utils.py:15` | ✅ Phase 1 + 2 SUCCESSFUL (5 VCCs) via loop reimplementation; ESBMC `bit_length` OM gap filed as [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756) |
-| `largest_power_of_2_divisor` | `vllm/utils/math_utils.py:30` | ✅ Phase 1 + 2 SUCCESSFUL (6 VCCs) via loop reimplementation; same blocker as above |
+| `next_power_of_2` | `vllm/utils/math_utils.py:15` | ✅ Phase 1 + 2 SUCCESSFUL (4 VCCs) on the verbatim upstream form; the loop-reimplementation workaround for [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756) was retired once [esbmc/esbmc#4757](https://github.com/esbmc/esbmc/pull/4757) landed |
+| `largest_power_of_2_divisor` | `vllm/utils/math_utils.py:30` | ✅ Phase 1 + 2 SUCCESSFUL (6 VCCs) on the verbatim upstream form; same fix as above |
 
 Each target also ships a buggy counterpart that exercises the corresponding implicit CWE-369 VCC or postcondition violation. Full table with per-target VCCs in [`REPORT.md` §5](./REPORT.md).
 
 ## Tier 1 — Cheap follow-ons (pure-int helpers, no new stubs)
 
-~~All Tier-1 targets shipped~~ — see *Already covered* above. The
-loop-reimplementation pattern that unblocked them is documented
-in [`RETROSPECTIVE.md`](./RETROSPECTIVE.md) (*Verification patterns
-worth carrying forward*, pattern #1 onwards). The remaining OM gap
-on `int.bit_length()` over symbolic input is tracked at
-[esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756);
-once it lands the loop reimplementations can be retired in favour
-of the verbatim upstream forms.
+~~All Tier-1 targets shipped~~ — see *Already covered* above.
+The loop-reimplementation workaround for
+[esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756)
+has been retired now that
+[esbmc/esbmc#4757](https://github.com/esbmc/esbmc/pull/4757)
+bounds the `bit_length` OM internally; both Tier-1 targets now
+verify the verbatim upstream bit-trick forms directly.
 
 ## Tier 2 — CLI / config validation hunts (live-bug-class targets)
 
@@ -82,7 +81,7 @@ These targets need the first non-trivial stubs in the PoC: a `KVCacheBlock` data
 | Item | Status |
 |---|---|
 | Track [vllm-project/vllm#43514](https://github.com/vllm-project/vllm/pull/43514) (candidate fix for issue #43496) to merge | Open; non-blocking. Doc update will reference the merge commit once landed. |
-| ~~File ESBMC issue: `int.bit_length()` operational model unbounded unwinding on symbolic input~~ | Filed as [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756) with the minimal reproducer that motivated the loop-reimplementation pattern. |
+| ~~File ESBMC issue: `int.bit_length()` operational model unbounded unwinding on symbolic input~~ | Filed and **RESOLVED** by [esbmc/esbmc#4757](https://github.com/esbmc/esbmc/pull/4757). Loop-reimplementation workaround in the Tier-1 harnesses has been retired. |
 | File ESBMC issue: slicer drops the CWE-369 VCC when the dividend precondition tightens from `>= 0` to `>= 1` (observed building `block_size_zero_cli_path`) | Lower priority; documented in `RETROSPECTIVE.md` §Stub-correctness as item to file. |
 
 ### vLLM upstream-engagement options

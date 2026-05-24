@@ -122,35 +122,30 @@ TARGETS: list[Target] = [
         expected="FAILED",
         safety_expected=None,
     ),
-    # The next four targets use loop reimplementations of upstream's
-    # bit-trick functions (see harness headers for the equivalence
-    # argument). --unwind 32 covers the longest loop the
-    # n <= 2^30 precondition admits (30 iterations).
+    # Verbatim upstream bit-trick forms (no loop reimplementation).
+    # ESBMC's bit_length OM now self-bounds (esbmc/esbmc#4757); no
+    # explicit --unwind needed.
     Target(
         name="next_power_of_2",
         entry="next_power_of_2.py",
-        esbmc_args=("--unwind", "32"),
         expected="SUCCESSFUL",
         safety_expected="SUCCESSFUL",
     ),
     Target(
         name="next_power_of_2_buggy",
         entry="next_power_of_2_buggy.py",
-        esbmc_args=("--unwind", "32"),
         expected="FAILED",
         safety_expected=None,
     ),
     Target(
         name="largest_power_of_2_divisor",
         entry="largest_power_of_2_divisor.py",
-        esbmc_args=("--unwind", "32"),
         expected="SUCCESSFUL",
         safety_expected="SUCCESSFUL",
     ),
     Target(
         name="largest_power_of_2_divisor_buggy",
         entry="largest_power_of_2_divisor_buggy.py",
-        esbmc_args=("--unwind", "32"),
         expected="FAILED",
         safety_expected=None,
     ),

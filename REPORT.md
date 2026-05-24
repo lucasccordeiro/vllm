@@ -172,7 +172,7 @@ AWS-Neuron REPORT.md:
 
 ## 4. ESBMC-Python limitations observed and retired
 
-All four frontend gaps observed during this session have been
+All five frontend gaps observed during this session have been
 filed and **fixed upstream**. The PoC has been refactored to use
 the upstream-supported forms; no workarounds remain in the
 checked-in code. Full chronological detail in
@@ -185,9 +185,10 @@ and *Source-rewriting history*).
 | [esbmc/esbmc#4745](https://github.com/esbmc/esbmc/issues/4745) | "PEP 604 `int \| None` class attr silently skipped" | [#4752](https://github.com/esbmc/esbmc/pull/4752) | Opaque-`vllm_config` stub no longer required for `int \| None` fields (when future targets need real `VllmConfig` modelling). |
 | [esbmc/esbmc#4746](https://github.com/esbmc/esbmc/issues/4746) | "`is not None` on `Optional[int]` errors 'pointer-backed vs non-pointer'" | [#4754](https://github.com/esbmc/esbmc/pull/4754) | Same — paired with #4745 above. |
 | [esbmc/esbmc#4747](https://github.com/esbmc/esbmc/issues/4747) | "Class `__init__` default referencing module-level name: `ESBMC_default_*` not in scope" | [#4751](https://github.com/esbmc/esbmc/pull/4751) | Sentinel-default fields are now usable directly when future targets need them. |
+| [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756) | "`int.bit_length()` OM unwinds indefinitely on symbolic input" | [#4757](https://github.com/esbmc/esbmc/pull/4757) | Loop-reimplementation workaround in `next_power_of_2` / `largest_power_of_2_divisor` retired; both targets now verify the verbatim upstream forms. `--unwind 32` dropped from their manifest entries. |
 
 The PoC's local ESBMC binary is rebuilt at or after the
-`#4754` merge (master commit `7d434cc303`, 2026-05-24).
+`#4757` merge (master commit `e3ae0f89cb36`, 2026-05-24).
 
 ## 7. Latent precondition in `get_num_blocks` (defensive, not live)
 
@@ -403,12 +404,12 @@ In order of increasing harness complexity:
 2. ~~`get_num_blocks`~~ — shipped (this commit).
 
 3. ~~`next_power_of_2` and `largest_power_of_2_divisor`~~ —
-   shipped via loop reimplementations
-   (ESBMC `bit_length` OM gap filed as
-   [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756)).
-   Tests `(n - 1).bit_length()`
-   and `n & (-n)` corners. Hits `n == 0`, `n < 0`, and the
-   two's-complement edge.
+   shipped (now verbatim upstream bit-trick forms; the earlier
+   loop-reimplementation workaround for
+   [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756)
+   was retired once
+   [esbmc/esbmc#4757](https://github.com/esbmc/esbmc/pull/4757)
+   landed).
 
 4. **`FreeKVCacheBlockQueue.popleft_n`** —
    `vllm/v1/core/kv_cache_utils.py:253`. First target needing a

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Target: vllm.utils.math_utils.next_power_of_2 (non-buggy, loop model).
+# Target: vllm.utils.math_utils.next_power_of_2 (non-buggy).
 #
 # Source (vllm-project/vllm @ 4438b6e):
 #     vllm/utils/math_utils.py:15
@@ -7,39 +7,27 @@
 #         """The next power of 2 (inclusive)"""
 #         return 1 if n < 1 else 1 << (n - 1).bit_length()
 #
-# Why a loop model? Upstream calls `int.bit_length()` on the
-# symbolic input, which ESBMC's Python frontend currently unwinds
-# indefinitely (see esbmc/esbmc#4756). The loop reimplementation
-# below uses only +, -, *, //, %, and comparison; ESBMC handles
-# it cleanly with --unwind 32.
+# Phase 1: with n in [1, INT_BOUND], the result is a positive
+# power of two equal to the smallest power of 2 >= n.
+# Phase 2: --overflow-check; the only bit-shift is bounded by the
+# n <= INT_BOUND assumption.
 #
-# The loop model is **equivalent to upstream** for n in [1, 2^30],
-# proven by case analysis:
-#   - Upstream returns `1 << (n - 1).bit_length()`, which is the
-#     smallest power of 2 >= n.
-#   - The loop multiplies r by 2 until r >= n, which produces the
-#     same smallest power of 2.
-# For n < 1, both forms return 1 explicitly.
+# Earlier versions of this harness used a loop reimplementation
+# because ESBMC's `int.bit_length()` operational model did not
+# terminate on symbolic input. That bug (esbmc/esbmc#4756) is now
+# fixed by esbmc/esbmc#4757; we verify the verbatim upstream form
+# directly.
 
 from stubs import nondet_int, __ESBMC_assume, INT_BOUND
 
 
 def next_power_of_2(n: int) -> int:
-    """Loop reimplementation, equivalent to upstream for n in [1, 2^30]."""
-    if n < 1:
-        return 1
-    r = 1
-    while r < n:
-        r = r * 2
-    return r
+    """Verbatim from vllm/utils/math_utils.py:15."""
+    return 1 if n < 1 else 1 << (n - 1).bit_length()
 
 
 def main() -> None:
     n = nondet_int()
-
-    # Bound the search so ESBMC's --unwind covers the loop. For
-    # n <= 2^30, the loop runs at most 30 iterations; --unwind 32
-    # in the manifest gives a small safety margin.
     __ESBMC_assume(1 <= n)
     __ESBMC_assume(n <= INT_BOUND)
 
