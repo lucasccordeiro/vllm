@@ -158,9 +158,55 @@ Severity: same UX class as #43521 (CLI-supplied invalid value, internal failure 
 
 Filing decision: separate upstream issue (this section's analysis goes into the body) rather than a #43521 comment, because the failure modes are distinct enough that maintainers may want them tracked separately for triage and tests. Issue draft is prepared in the corresponding PR.
 
+## Broader audit — argparse-settable `int` fields without `SkipValidation`
+
+The initial audit was scoped to `SkipValidation[int]` because that's the explicit "Pydantic, don't validate this" marker. The broader question — *every* CLI-settable integer parameter, regardless of `SkipValidation` — surfaces additional candidates. Enumerated below from `vllm/config/*.py` cross-referenced with `vllm/engine/arg_utils.py` to confirm CLI-settability.
+
+### Already validated (no audit work needed)
+
+| Field | Validator |
+|---|---|
+| `mamba_block_size` | `Field(default=None, gt=0)` |
+| `max_num_batched_tokens` | `Field(default=DEFAULT_MAX_NUM_BATCHED_TOKENS, ge=1)` |
+| `max_num_seqs` | `Field(default=DEFAULT_MAX_NUM_SEQS, ge=1)` |
+| `max_num_partial_prefills` | `Field(default=1, ge=1)` |
+| `max_long_partial_prefills` | `Field(default=1, ge=1)` |
+| `stream_interval` | `Field(default=1, ge=1)` |
+| `gpu_memory_utilization` | `Field(default=0.92, gt=0, le=1)` |
+
+Pydantic enforces these at config-construction time. No further audit work needed.
+
+### Candidates (CLI-settable; no `gt=0` / `ge=1` constraint)
+
+| # | Field | CLI flag | Validator | Live-bug shape (rough) |
+|---|---|---|---|---|
+| 3 | `num_gpu_blocks_override` | `--num-gpu-blocks-override` | `int \| None = None` (no constraint) | Propagates to `BlockPool.__init__(num_gpu_blocks=…)` at `vllm/v1/core/block_pool.py:157`, which asserts `num_gpu_blocks > 0`. Internal `AssertionError` (less clean than `ValueError`) for `0` or negative inputs. |
+| 4 | `max_model_len` | `--max-model-len` | `Field(default=None, ge=-1)` | `ge=-1` exists (so `-1` is the auto-derive sentinel), but `0` is also accepted. Reaches subtractive arithmetic in `vllm/v1/core/sched/scheduler.py:397` (`min(num_new_tokens, self.max_model_len - 1 - request.num_computed_tokens)`); with `max_model_len = 0`, the right-hand side is `-1 - num_computed_tokens` ≤ -1. Likely silent corruption or hang, depending on how `get_and_verify_max_len` (`vllm/config/model.py:1729`) normalises before reaching the scheduler. |
+| 5 | `max_logprobs` | `--max-logprobs` | `int = 20` (no constraint) | Negative or extremely large values reach logprob array slicing. |
+| 6 | `long_prefill_token_threshold` | `--long-prefill-token-threshold` | `int = 0` (no constraint; 0 is "off") | Used in `vllm/v1/core/sched/scheduler.py:393` (`if 0 < self.scheduler_config.long_prefill_token_threshold < num_new_tokens: num_new_tokens = self.scheduler_config.long_prefill_token_threshold`). The `0 < ...` guard handles the default but treats *negative* as "off" too — possibly intended, possibly silent. |
+
+### Programmatic-only fields (lower priority; included for completeness)
+
+These are set from model config / engine state, not directly by the user, but they're still `int | None` with no validator and could be corrupted by a malformed model HF config:
+
+- `sliding_window: int | None = None` (model config)
+- `kv_cache_memory_bytes: int | None = None` (engine-state)
+- `mamba_page_size_padded: int | None = None` (engine-state)
+- `spec_target_max_model_len: int | None = None` (spec-decode config)
+- `max_num_scheduled_tokens: int | None = None` (scheduler-state; defensively replaced with `max_num_batched_tokens` if `0` — see `vllm/v1/core/sched/scheduler.py:104-106`. Negative would skip the fallback and propagate as the token budget.)
+
+### Priority for harness work
+
+1. **`--num-gpu-blocks-override 0` / negative** — easiest harness (we already model `may_override_num_blocks`); confirms the assertion path. Low-novelty: assertion failure rather than `ZeroDivisionError`. **Likely live**.
+2. **`--max-model-len 0`** — needs to trace through `get_and_verify_max_len` to confirm whether the value is normalised before the scheduler reads it. If not normalised, subtractive arithmetic in `scheduler.py:397` could cause `num_new_tokens` to go negative, then propagate to KV-cache allocation. **Strongest live-bug candidate**.
+3. `--max-logprobs` negative — easy to harness; smaller blast radius.
+4. `--long-prefill-token-threshold` negative — model is small but the guard is suggestive of a "treat 0 as off" intent that negatives slip past.
+
+Each item is queued as a follow-up Tier 2 harness in [`ROADMAP.md`](./ROADMAP.md).
+
 ## Out of scope (this audit)
 
-- **Argparse `int` parameters not declared `SkipValidation`**. Many of these have `Field(gt=0)` or similar Pydantic constraints; some may not. A broader audit covering all of `arg_utils.py`'s `int` flags is queued for ROADMAP Tier 2 follow-up.
+- **Argparse `int` parameters not declared `SkipValidation`**. ~~Many of these have `Field(gt=0)` or similar Pydantic constraints; some may not. A broader audit covering all of `arg_utils.py`'s `int` flags is queued for ROADMAP Tier 2 follow-up.~~ ✅ Shipped (above).
 - **`int | None` Pydantic fields without `SkipValidation`**. Pydantic coerces and rejects most invalid inputs even without an explicit `gt=0`, but the rejection happens at config-construction time with a generic message; per-field constraint would give a better UX. Lower priority.
 - **Non-positive-but-non-zero values**. `-1`, `-2^30`, etc. The `bs % -1` analysis above for `hash_block_size` is illustrative; a full sweep across all integer config parameters is out of scope here.
 - **String-to-int coercion attacks**. CLI passes everything as strings; argparse coerces with `type=int`. Edge cases like `"0o0"`, `"0x0"`, `"+0"`, scientific notation, are all argparse-handled and out of scope.

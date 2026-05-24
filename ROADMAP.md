@@ -38,13 +38,13 @@ The `block_size_zero_cli_path` finding (issue #43496) demonstrated that **CLI pa
 | Target / parameter | Source | New stubs | Blockers / notes |
 |---|---|---|---|
 | ~~Audit of all `SkipValidation[int]` fields~~ | `vllm/config/*.py` | none | ✅ Shipped as [`AUDIT.md`](./AUDIT.md). Two fields enumerated; one already filed (#43496), the other (`hash_block_size`) confirmed as a second live, CLI-reachable bug of the same shape. |
-| `--max-model-len 0` | `vllm/engine/arg_utils.py` → `kv_cache_interface.max_memory_usage_bytes` | none | Likely caught by Pydantic constraints; verify. |
-| `--max-num-batched-tokens 0` | `vllm/engine/arg_utils.py` → `vllm/v1/core/sched/scheduler.py` (token-budget loop) | minimal `SchedulerConfig` stub | High blast radius if validator gap exists; touches the flagship scheduler target. |
-| `--max-num-seqs 0` | `vllm/engine/arg_utils.py` → scheduler running list | minimal `SchedulerConfig` stub | Same family. |
-| `--gpu-memory-utilization` boundary | `vllm/config/cache.py:67` (`Field(gt=0, le=1)`) | none | Constraint *is* in place; verify it actually catches edge values (`0.0`, `1.0`, `nan`). Negative result acceptable. |
-| `--num-gpu-blocks-override 0` / `--num-gpu-blocks-override -1` | `vllm/v1/core/kv_cache_utils.py:898` (`may_override_num_blocks`) | none (we already stub this) | Override of `num_blocks` to `0` would crash `BlockPool.get_usage` (Tier 3). Likely live. |
+| ~~Broader audit of all CLI-settable `int` fields without `SkipValidation`~~ | `vllm/config/*.py` × `vllm/engine/arg_utils.py` | none | ✅ Shipped as [`AUDIT.md`](./AUDIT.md) *Broader audit*. Four new candidates enumerated (`num_gpu_blocks_override`, `max_model_len`, `max_logprobs`, `long_prefill_token_threshold`) plus several programmatic-only fields. Priority queue for harnessing in `AUDIT.md`. |
 | `--hash-block-size 0` | `vllm/config/cache.py:54` → `vllm/v1/core/kv_cache_utils.py:628` | none | ✅ **Shipped, reproduced, filed as [vllm-project/vllm#43521](https://github.com/vllm-project/vllm/issues/43521).** Harness `hash_block_size_zero_cli_path.py` produces the CWE-369 counterexample (`hash_block_size != 0`); the sandbox reproducer triggers the exact crash at line 628 of `resolve_kv_cache_block_sizes`. See [`AUDIT.md`](./AUDIT.md) Finding #2 and REPORT.md §5. |
 | `--hash-block-size -k` (k ≥ 1) propagation | `vllm/v1/core/kv_cache_utils.py:660-680` (`request_block_hasher` loop) | none | ✅ **Shipped and empirically reproduced.** Harness `hash_block_size_negative_propagation.py`; ESBMC's unwinding-assertion fires with witness `block_size = -1, num_tokens = 4`; sandbox reproducer triggers an infinite loop in the hasher closure. See [`AUDIT.md`](./AUDIT.md) Finding #2 *Adjacent failure mode*. Upstream issue to be filed separately from #43521 (different failure shape: silent startup, first-request hang). |
+| `--max-model-len 0` | `vllm/engine/arg_utils.py` → `vllm/v1/core/sched/scheduler.py:397` | none | **Top live-bug candidate** from broader audit. `Field(default=None, ge=-1)` admits `0`; reaches `min(num_new_tokens, self.max_model_len - 1 - num_computed_tokens)` which yields negative values. Need to trace `get_and_verify_max_len` first. |
+| `--num-gpu-blocks-override 0` / negative | `vllm/v1/core/kv_cache_utils.py:898` → `vllm/v1/core/block_pool.py:157` | none (we already stub `may_override_num_blocks`) | **Confirmed-shape candidate**: propagates to `BlockPool.__init__`'s `assert num_gpu_blocks > 0`. Internal `AssertionError`, less clean than `ValueError`. |
+| `--max-logprobs <negative>` | `vllm/engine/arg_utils.py` → logprob array slicing | none | No validator; negative may slice unexpectedly. Smaller blast radius. |
+| `--long-prefill-token-threshold <negative>` | `vllm/engine/arg_utils.py` → `vllm/v1/core/sched/scheduler.py:393` | none | Default `0` is special-cased; the `0 < x < num_new_tokens` guard skips negatives, possibly intentionally. Worth a harness to confirm. |
 | `--block-size N` for prime / non-power-of-2 `N` | same as #43496 chain | none | The accepted bug fix (#43514) only enforces positivity, not the backend's `bs % 16 == 0`-style preference. Worth checking the downstream crash mode for accepted-but-suboptimal values. |
 
 ## Tier 3 — KV cache & block manager (new data-structure stubs)
@@ -53,7 +53,7 @@ These targets need the first non-trivial stubs in the PoC: a `KVCacheBlock` data
 
 | Target | Source | New stubs | Blockers / proof obligations |
 |---|---|---|---|
-| `BlockPool.get_usage` | `vllm/v1/core/block_pool.py` | minimal `BlockPool` (just `num_gpu_blocks`, `get_num_free_blocks()`) | `1.0 - (free / total)` → CWE-369 if `num_gpu_blocks == 0`. Quick sanity-check target before tackling the linked list. |
+| ~~`BlockPool.get_usage`~~ | `vllm/v1/core/block_pool.py:497` | minimal `BlockPool` | **Not a live-bug candidate.** Inspection of the actual function shows two guards: the constructor asserts `num_gpu_blocks > 0` (line 157), and the function itself early-returns 0 when `total_gpu_blocks == 0`. The "div-by-zero candidate" framing in earlier drafts of this roadmap was speculative; the function is already safe. Verifying the docstring contract (`0.0 ≤ result ≤ 1.0`) is still a valid contract-verification target but yields no bug. Demoted to *optional* under Tier 3. |
 | `FreeKVCacheBlockQueue.popleft_n(n)` | `vllm/v1/core/kv_cache_utils.py:253` | doubly-linked `KVCacheBlock` at concrete K = 4 or 8 | `num_free_blocks` monotone-decreasing; `len(ret) == n`; no block popped twice; `prev/next` pointers consistent after the pop. |
 | `FreeKVCacheBlockQueue.append_n` | `vllm/v1/core/kv_cache_utils.py:329` | same | Mirror invariant; inverse of `popleft_n`. |
 | `BlockPool.get_new_blocks(num_blocks)` | `vllm/v1/core/block_pool.py:333` | adds ref-counting on `KVCacheBlock` | `ref_cnt == 0` before, `== 1` after; no block returned twice; raises on insufficient free blocks. |
@@ -98,11 +98,12 @@ These targets need the first non-trivial stubs in the PoC: a `KVCacheBlock` data
 1. ~~**Tier 1**: `next_power_of_2` + `largest_power_of_2_divisor`~~ — shipped, [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756) filed.
 2. ~~**Methodology**: VCC-count assertion in `verify.py`~~ — shipped.
 3. ~~**Tier 2 audit** of `SkipValidation[int]` fields~~ — shipped as [`AUDIT.md`](./AUDIT.md). Second live bug confirmed (`hash_block_size`).
-4. **Tier 2 harnesses** for the top one or two candidates from the audit, one per session.
-5. **Tier 3, row 1** (`BlockPool.get_usage`): quick sanity check on `num_gpu_blocks == 0` → CWE-369. ~1 hour.
-6. **Tier 3, rows 2–3** (`popleft_n` / `append_n`): first real data-structure stub. ~half a day. The doubly-linked-list-at-K-nodes pattern then unlocks rows 4–5.
-7. **Tier 3, rows 4–5**: build on the free-list stub. ~half a day each.
-8. **Tier 4** in priority order: `_has_repeating_pattern` (cheapest), then `check_stop`, then the flagship `schedule()` token-budget loop. The last is multi-week.
+4. ~~**Tier 2 broader audit** of all CLI-settable `int` fields without `SkipValidation`~~ — shipped as [`AUDIT.md`](./AUDIT.md) *Broader audit*. Four new candidates queued; `--max-model-len 0` is the top live-bug candidate.
+5. **Tier 2 harnesses** for the top candidates from the audit (start with `--max-model-len 0`, then `--num-gpu-blocks-override 0`), one per session.
+6. **Tier 3, row 1** (`BlockPool.get_usage`): demoted to *optional contract-verification target* — inspection of the actual function shows it's already safe (constructor asserts `num_gpu_blocks > 0`, function early-returns 0 when `total_gpu_blocks == 0`). The earlier "div-by-zero candidate" framing was speculative.
+7. **Tier 3, rows 2–3** (`popleft_n` / `append_n`): first real data-structure stub. ~half a day. The doubly-linked-list-at-K-nodes pattern then unlocks rows 4–5.
+8. **Tier 3, rows 4–5**: build on the free-list stub. ~half a day each.
+9. **Tier 4** in priority order: `_has_repeating_pattern` (cheapest), then `check_stop`, then the flagship `schedule()` token-budget loop. The last is multi-week.
 
 ## End-state estimates
 
