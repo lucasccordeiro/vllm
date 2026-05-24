@@ -72,7 +72,7 @@ These targets need the first non-trivial stubs in the PoC: a `KVCacheBlock` data
 
 | Item | Status / blockers |
 |---|---|
-| **VCC-count assertion in `verify.py`**. After every ESBMC invocation, parse the `Generated N VCC(s)` line and treat `N == 0` on a `SUCCESSFUL` verdict as a hard failure (Finding 1 prevention). | Recommended next-session quick win. |
+| ~~**VCC-count assertion in `verify.py`**~~. Parses the `Generated N VCC(s)` line after every ESBMC invocation; `N == 0` on a `SUCCESSFUL` verdict reports `FAIL (vacuous: 0 VCCs)`. | ✅ Shipped. Verified by a deliberately-vacuous probe before merge. |
 | **CI integration**. GitHub Actions job that pins ESBMC, runs `make verify` on PR, fails on any regression. | Requires deciding whether to ship a binary blob, a build step, or rely on a Docker image. Defer until target count > 15 or test wall-clock > 5 min becomes painful. |
 | **Bound auto-tuning**. Today `SMALL_BOUND` and `INT_BOUND` are picked by hand. Could be replaced with a per-target precondition tuple + a binary-search wrapper that picks the largest bound the solver handles within a wall-clock budget. | Low priority; current convention is documented in `harness/stubs.py`. |
 
@@ -95,7 +95,7 @@ These targets need the first non-trivial stubs in the PoC: a `KVCacheBlock` data
 ## Recommended sequence
 
 1. ~~**Tier 1**: `next_power_of_2` + `largest_power_of_2_divisor`~~ — shipped, [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756) filed.
-2. **Methodology**: VCC-count assertion in `verify.py`. ~1 hour. Guards against Finding-1-style vacuous-SUCCESSFUL regressions on future targets.
+2. ~~**Methodology**: VCC-count assertion in `verify.py`~~ — shipped.
 3. **Tier 2 audit** of `SkipValidation[int]` fields: static recon only, ~1 hour. Produces a list of CLI-path harness candidates with rough live-bug likelihood. Could surface a second bug like `--block-size 0`.
 4. **Tier 2 harnesses** for the top one or two candidates from the audit, one per session.
 5. **Tier 3, row 1** (`BlockPool.get_usage`): quick sanity check on `num_gpu_blocks == 0` → CWE-369. ~1 hour.

@@ -113,7 +113,7 @@ The intent was that ESBMC would treat the names as intrinsics and override the b
 
 **Side adjustment.** With real symbolic execution, postconditions involving non-linear arithmetic in symbolic inputs (`q * b >= a` where `q = -(a // -b)`) became intractable at `INT_BOUND = 2^30`. A second bound `SMALL_BOUND = 2^10` was introduced for those targets; it covers all realistic vLLM call sites and keeps each entry under a few seconds.
 
-**General lesson.** **Never define a function in a stub library whose name might be claimed as a verifier intrinsic.** If the verifier's intrinsic-recognition order is "user definition wins", a sanity-friendly Python body silently turns symbolic execution into concrete execution and makes every `assert` reachable only on the trivial path. A `--no-slice` VCC count probe (or any way to confirm the assertion VCC was generated) should be part of every target's commit checklist.
+**General lesson.** **Never define a function in a stub library whose name might be claimed as a verifier intrinsic.** If the verifier's intrinsic-recognition order is "user definition wins", a sanity-friendly Python body silently turns symbolic execution into concrete execution and makes every `assert` reachable only on the trivial path. The VCC-count guard now in `verify.py` (see *Verification patterns worth carrying forward* §6) enforces this as a hard precondition for every `SUCCESSFUL` verdict — a future Finding-1-style regression would be caught at the next `make verify` run.
 
 **Impact on prior findings.** The live `--block-size 0` finding (#43496) and the latent `get_num_blocks` precondition both survived the audit — both relied on ESBMC's implicit CWE-369 check, not the (vacuous) user asserts. The empirical end-to-end reproduction in REPORT.md §9 independently confirms the live crash. Documentation and verdict tables were rewritten post-audit to reflect real VCC counts.
 
@@ -125,9 +125,11 @@ The intent was that ESBMC would treat the names as intrinsics and override the b
 
 3. **`SMALL_BOUND` / `INT_BOUND` split** (new). Tailoring the precondition bound to the postcondition shape: tight for non-linear arithmetic (Bitwuzla bottleneck), wide for the linear / CWE-369 case. Documented explicitly in `harness/stubs.py` so a future contributor doesn't loosen a bound and accidentally trigger a non-termination.
 
-4. **VCC-count spot check** (new, response to Finding 1). After every new harness, confirm `Generated N VCC(s)` with N > 0 for the non-buggy entry; a `0 VCC(s)` outcome means the verifier is not actually checking your assertion. Worth automating into `verify.py` as a hard gate.
+4. **VCC-count spot check** (new, response to Finding 1; **now automated**). After every ESBMC invocation, `verify.py` parses the `Generated N VCC(s)` line and treats `N == 0` on a `SUCCESSFUL` verdict as a hard failure (`FAIL (vacuous: 0 VCCs)`). A future Finding-1-style regression — placeholder defs accidentally re-introduced, a frontend bug that drops the assertion VCC, anything else that lets `SUCCESSFUL` come back without symbolic execution actually running — is caught at the next `make verify` run.
 
 5. **Empirical reproduction after a counterexample** (new). For a CLI-path or call-site target, install the upstream package and reproduce the static counterexample as a runtime crash. Adds the live traceback to the upstream issue and pins down any modelling-vs-reality drift.
+
+6. **Per-line VCC count in verify.py output** (new). Each verdict line shows `vcc=N`, surfacing the symbolic-execution coverage of each target without needing to re-run with `--no-slice`. Useful when adding a new postcondition: a sudden drop in `vcc` from one commit to the next is a signal that the slicer simplified more of the assertion away than intended.
 
 ## What's still out of scope
 
