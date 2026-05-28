@@ -36,7 +36,7 @@ Two `SkipValidation[int]` fields total. The rest are non-int and out of scope pe
 
 ## Finding #1 — `CacheConfig.block_size`
 
-Already documented as a shipped target. See [`REPORT.md` §9](./REPORT.md) and [`RETROSPECTIVE.md`](./RETROSPECTIVE.md) → *Real upstream bugs caught*. No further audit work needed.
+Already documented as a shipped target. See [`REPORT.md` §7](./REPORT.md) and [`RETROSPECTIVE.md`](./RETROSPECTIVE.md) → *Real upstream bugs caught*. No further audit work needed.
 
 ## Finding #2 — `CacheConfig.hash_block_size`
 
