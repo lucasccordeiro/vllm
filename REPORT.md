@@ -1,11 +1,12 @@
 # vLLM ESBMC-Python Verification — Progress Report
 
-**Status**: pipeline operational; four function targets plus one
-CLI-path target verified end-to-end **under real symbolic
-execution** (see §10 for the methodology audit and fix). Full
-`make verify` (nine entries × two phases) completes in ~50 s on
-aarch64 macOS, with each non-buggy entry generating between 3 and
-8 verification conditions.
+**Status**: pipeline operational; **30 verification targets** across
+Tiers 1–4 verified end-to-end **under real symbolic execution** (see
+§10 for the methodology audit and fix). Full `make verify` (30 entries
+× two phases) completes in ~4 min on aarch64 macOS with 0 failures.
+Per-entry VCC counts span 1 (CLI-path live-bug witnesses) to 6816
+(`has_repeating_pattern` Phase 2); every non-buggy entry generates
+> 0 VCCs, enforced by the vacuity guard in `verify.py`.
 
 **First live, CLI-reachable upstream finding (§9). Filed as
 [vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496);
@@ -81,6 +82,7 @@ engine. Structure mirrors the AWS-Neuron NKI PoC (see
 | 16 | `FreeKVCacheBlockQueue.append_n` at concrete K = 4 | `vllm/v1/core/kv_cache_utils.py:329` (second Tier-3 data-structure target; inverse of popleft_n, same stub shape) |
 | 17 | `BlockPool.get_new_blocks` at concrete K = 4 | `vllm/v1/core/block_pool.py` (Tier-3 row 4; first ref-counting layer — free-list pop + per-block `ref_cnt 0 → 1`, raise-on-insufficient guard, no-double-return) |
 | 18 | `KVCacheManager.allocate_slots` token accounting | `vllm/v1/core/kv_cache_manager.py` (Tier-3 row 5; the coordinator — `min(…, max_model_len)` saturations, `num_tokens_main_model = total_computed_tokens + num_new_tokens`, and the `num_blocks_to_allocate > get_num_free_blocks()` admission guard) |
+| 19 | `_has_repeating_pattern` negative-index safety at K = 8 | `vllm/v1/core/sched/utils.py:10` (first Tier-4 scheduler-invariant target; proves every `token_ids[-(pattern_len*m+n)]` access is in bounds under the caller precondition `pattern_len * min_count <= len`) |
 
 Targets 1–3 are pure integer helpers with explicit preconditions;
 both the non-buggy and buggy entries are toy contracts that
@@ -432,13 +434,15 @@ every non-buggy entry has > 0.
 | `long_prefill_token_threshold_negative_cli_path` | **FAILED (silent-config-acceptance witness; field admits any negative, scheduler.py:395 guard `0 < threshold < num_new_tokens` silently no-ops, user-set cap has zero effect)** | skipped         | 1    |
 | `block_size_non_power_of_2_supports` | SUCCESSFUL (contract-verification closure; post-#43794 backend-selection chain proven sound for non-power-of-2 N) | SUCCESSFUL (expected) | 6 |
 | `free_kv_cache_block_queue_popleft_n` (K = 4)    | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 2321 |
-| `free_kv_cache_block_queue_popleft_n_buggy`      | FAILED (expected; prev[curr] = HEAD reconnect dropped, postcondition P3 violated) | skipped | 1481 |
+| `free_kv_cache_block_queue_popleft_n_buggy`      | FAILED (expected; prev[curr] = HEAD reconnect dropped, postcondition P3 violated) | skipped | 1860 |
 | `free_kv_cache_block_queue_append_n` (K = 4)     | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 1602 |
 | `free_kv_cache_block_queue_append_n_buggy`       | FAILED (expected; fake_tail_prev = last rewire dropped, postcondition P5 violated) | skipped | 1065 |
 | `block_pool_get_new_blocks` (K = 4)              | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 3168 |
 | `block_pool_get_new_blocks_buggy`                | FAILED (expected; non-advancing pop returns a block twice, production `assert block.ref_cnt == 0` violated) | skipped | 1286 |
 | `kv_cache_manager_allocate_slots`                | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 7    |
 | `kv_cache_manager_allocate_slots_buggy`          | FAILED (expected; `min(…, max_model_len)` saturation dropped, P3 `num_tokens_need_slot <= max_model_len` violated) | skipped | 1    |
+| `has_repeating_pattern` (K = 8)                  | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 3902 |
+| `has_repeating_pattern_buggy`                    | FAILED (expected; caller precondition dropped, negative index `magnitude <= K` out of bounds) | skipped | 3902 |
 | `next_power_of_2`          | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 5    |
 | `next_power_of_2_buggy`    | FAILED (expected)             | skipped                      | 5    |
 | `largest_power_of_2_divisor`       | SUCCESSFUL (expected) | SUCCESSFUL (expected)        | 39   |
