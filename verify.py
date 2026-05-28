@@ -222,6 +222,18 @@ TARGETS: list[Target] = [
         expected="FAILED",
         safety_expected=None,
     ),
+    Target(
+        name="kv_cache_manager_allocate_slots",
+        entry="kv_cache_manager_allocate_slots.py",
+        expected="SUCCESSFUL",
+        safety_expected="SUCCESSFUL",
+    ),
+    Target(
+        name="kv_cache_manager_allocate_slots_buggy",
+        entry="kv_cache_manager_allocate_slots_buggy.py",
+        expected="FAILED",
+        safety_expected=None,
+    ),
     # The next four targets use loop reimplementations of upstream's
     # bit-trick functions (see harness headers for the equivalence
     # argument). --unwind 32 covers the longest loop the
