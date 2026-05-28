@@ -249,6 +249,20 @@ TARGETS: list[Target] = [
         expected="FAILED",
         safety_expected=None,
     ),
+    Target(
+        name="has_repeating_pattern",
+        entry="has_repeating_pattern.py",
+        esbmc_args=("--unwind", "9"),
+        expected="SUCCESSFUL",
+        safety_expected="SUCCESSFUL",
+    ),
+    Target(
+        name="has_repeating_pattern_buggy",
+        entry="has_repeating_pattern_buggy.py",
+        esbmc_args=("--unwind", "9"),
+        expected="FAILED",
+        safety_expected=None,
+    ),
     # The next four targets use loop reimplementations of upstream's
     # bit-trick functions (see harness headers for the equivalence
     # argument). --unwind 32 covers the longest loop the

@@ -81,6 +81,7 @@ engine. Structure mirrors the AWS-Neuron NKI PoC (see
 | 16 | `FreeKVCacheBlockQueue.append_n` at concrete K = 4 | `vllm/v1/core/kv_cache_utils.py:329` (second Tier-3 data-structure target; inverse of popleft_n, same stub shape) |
 | 17 | `BlockPool.get_new_blocks` at concrete K = 4 | `vllm/v1/core/block_pool.py` (Tier-3 row 4; first ref-counting layer — free-list pop + per-block `ref_cnt 0 → 1`, raise-on-insufficient guard, no-double-return) |
 | 18 | `KVCacheManager.allocate_slots` token accounting | `vllm/v1/core/kv_cache_manager.py` (Tier-3 row 5; the coordinator — `min(…, max_model_len)` saturations, `num_tokens_main_model = total_computed_tokens + num_new_tokens`, and the `num_blocks_to_allocate > get_num_free_blocks()` admission guard) |
+| 19 | `_has_repeating_pattern` negative-index safety at K = 8 | `vllm/v1/core/sched/utils.py:10` (first Tier-4 scheduler-invariant target; proves every `token_ids[-(pattern_len*m+n)]` access is in bounds under the caller precondition `pattern_len * min_count <= len`) |
 
 Targets 1–3 are pure integer helpers with explicit preconditions;
 both the non-buggy and buggy entries are toy contracts that
@@ -439,6 +440,8 @@ every non-buggy entry has > 0.
 | `block_pool_get_new_blocks_buggy`                | FAILED (expected; non-advancing pop returns a block twice, production `assert block.ref_cnt == 0` violated) | skipped | 1286 |
 | `kv_cache_manager_allocate_slots`                | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 7    |
 | `kv_cache_manager_allocate_slots_buggy`          | FAILED (expected; `min(…, max_model_len)` saturation dropped, P3 `num_tokens_need_slot <= max_model_len` violated) | skipped | 1    |
+| `has_repeating_pattern` (K = 8)                  | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 3902 |
+| `has_repeating_pattern_buggy`                    | FAILED (expected; caller precondition dropped, negative index `magnitude <= K` out of bounds) | skipped | 3902 |
 | `next_power_of_2`          | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 5    |
 | `next_power_of_2_buggy`    | FAILED (expected)             | skipped                      | 5    |
 | `largest_power_of_2_divisor`       | SUCCESSFUL (expected) | SUCCESSFUL (expected)        | 39   |
