@@ -8,37 +8,21 @@ Per-entry VCC counts span 1 (CLI-path live-bug witnesses) to 6816
 (`has_repeating_pattern` Phase 2); every non-buggy entry generates
 > 0 VCCs, enforced by the vacuity guard in `verify.py`.
 
-**First live, CLI-reachable upstream finding (§9). Filed as
+**Flagship live finding (§9):** `--block-size 0` is accepted by
+argparse and crashes engine init with `ZeroDivisionError` inside
+`cdiv(max_model_len, self.block_size)`. Filed as
 [vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496);
 fixed upstream by
 [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794)
-(merged 2026-05-27, commit
-[`2c2c9666`](https://github.com/vllm-project/vllm/commit/2c2c966669032e863f94919e9225aa12378c9364)),
-which also closes the sibling findings #43521 (`--hash-block-size 0`)
-and #43532 (`--max-model-len 0`).**
-`vllm serve <model> --block-size 0` is accepted by argparse, passes
-through `CacheConfig` (which uses `SkipValidation[int]`), passes
-through `Platform.update_block_size_for_backend` (which preserves
-user-specified values), and crashes engine init with
-`ZeroDivisionError` inside `cdiv(max_model_len, self.block_size)`
-at `vllm/v1/kv_cache_interface.py:218`. The
-`vllm_config.validate_block_size()` call at
-`vllm/v1/engine/core.py:283` runs too late to produce a clean
-error. The ESBMC counterexample for
-`block_size_zero_cli_path.py` is the bug witness; the fix is a
-one-line `Field(gt=0)` on `CacheConfig.block_size` (or an early
-explicit check in `_apply_block_size_default`).
+(merged 2026-05-27), which also closes the siblings #43521
+(`--hash-block-size 0`) and #43532 (`--max-model-len 0`). Full trace,
+counterexample, and empirical reproduction in **§9**.
 
-**First latent-precondition finding (defensive, not a live bug; §7).**
-`vllm.v1.core.kv_cache_utils.get_num_blocks` has no in-function
-guard on `page_size > 0` or `num_layers > 0`, and its unique caller
-asserts only `group_size > 0` (= `num_layers`). ESBMC produces a
-deterministic counterexample at `page_size == 0` (CWE-369,
-ZeroDivisionError). End-to-end reachability analysis (§7) shows
-the failure is **not reachable from any normal upstream invocation**:
-the only theoretical path requires a malformed HuggingFace model
-config with `head_size == 0`. The finding is a defensive-invariant
-gap, not an exploitable bug.
+**Latent finding (§7, defensive — not a live bug):**
+`get_num_blocks` divides by `page_size` / `num_layers` without
+guarding either; ESBMC flags `page_size == 0` (CWE-369), but
+reachability analysis shows it is unreachable from any normal
+invocation. Details in **§7**.
 
 **Pin**: vllm-project/vllm @ commit `4438b6e` (HEAD at session start).
 
