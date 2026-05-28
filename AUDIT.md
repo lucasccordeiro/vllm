@@ -582,6 +582,63 @@ def _check_long_prefill_token_threshold(cls, v):
     return v
 ```
 
+## Finding #7 — `--block-size N` for non-power-of-2 `N`: investigated, no live bug
+
+**Status**: contract-verification closure rather than live-bug witness. Documented here for symmetry with Findings #1–#6 (which all surfaced live bugs of the same hunt class) and to record the negative result so future audits don't re-hunt the same row.
+
+### Context
+
+The ROADMAP.md Tier-2 table flagged `--block-size N` for prime / non-power-of-2 `N` as worth checking: the upstream umbrella fix [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794) replaces `SkipValidation[int]` on `CacheConfig.block_size` with `Field(default=None, gt=0)`, which enforces positivity but does *not* constrain the value to a power of 2 or to a multiple of the backend's kernel-block-size requirement (`MultipleOf(16)` for flash_attn / triton_attn / rocm_attn / rocm_aiter_unified_attn / flash_attn_diffkv).
+
+### Trace
+
+1. **CLI** (`vllm/engine/arg_utils.py`): `--block-size 13` admitted by Pydantic (`gt=0` only).
+2. **`Platform.update_block_size_for_backend`** (`vllm/platforms/interface.py:489-501`): when `user_specified_block_size=True`, the "Phase 1: Pick block size from backend" branch is skipped — the user's value is preserved verbatim. No `supports_block_size` check at this layer.
+3. **Backend selection** (`vllm/platforms/cuda.py:get_attn_backend_cls` at line 293; mirror path at `rocm.py:468`): iterates candidate backends and calls `backend_class.validate_configuration(...)`, which composes `supports_block_size(block_size)` (`vllm/v1/attention/backend.py:175-191`). `supports_block_size` returns `True` iff `block_size % supported_size == 0` for some element of `get_supported_kernel_block_sizes()`. For `MultipleOf(16)` backends and `block_size=13`, the predicate returns `False`; the backend is excluded from `valid_backends_priorities`; either an alternative `MultipleOf(1)` backend is selected (with a `--block-size %d precluded higher-priority backend(s) ... Consider removing --block-size to auto-select the optimal block size.` warning), or `get_attn_backend_cls` raises `ValueError("No valid attention backend found ... Reasons: ... block_size not supported ...")`.
+4. **Defensive downstream assertions**:
+    - `vllm/v1/attention/backends/utils.py:325`: `assert attn_chunk_size % block_size == 0, f"attn_chunk_size {attn_chunk_size} is not divisible by block_size {block_size}"` — fires for local-attention models if the user's `--block-size N` doesn't divide the model's local-attention window. Message names the violating values.
+    - `vllm/v1/kv_offload/base.py:365`: `assert block_size % self.hash_block_size == 0, f"gpu_block_size={block_size} not divisible by hash_block_size={self.hash_block_size}. ..."` — fires for hybrid models with prefix-caching mis-alignment. Message names the violating values.
+    - `vllm/v1/attention/ops/chunked_prefill_paged_decode.py:369-371`: explicit `is_pow2` detection with a Triton-fallback branch (`if not is_pow2 or not has_native_layout: use_custom = False`) — non-power-of-2 silently dispatches to the slower-but-correct Triton path.
+
+### ESBMC verification
+
+Harness `harness/block_size_non_power_of_2_supports.py`. Models the kernel-block-size predicate over symbolic `block_size in [1, 2^30]` and symbolic `K in [1, 2^30]` (the `MultipleOf(K).base`). Asserts both directions of the contract: `accepted ⇒ block_size % K == 0` and `block_size % K == 0 ⇒ accepted`. Pins the concrete witness `K = 16, block_size = 13 ⇒ not accepted`.
+
+Phase 1: SUCCESSFUL, 6 VCCs. Phase 2 (`--overflow-check`): SUCCESSFUL, 10 VCCs. Non-vacuous.
+
+### Empirical reproduction
+
+```python
+import dataclasses
+from vllm.config.cache import CacheConfig
+from vllm.v1.attention.backend import AttentionBackend, MultipleOf
+
+# Post-#43794: Field(gt=0) admits 13.
+bs_field = next(f for f in dataclasses.fields(CacheConfig) if f.name == "block_size")
+# bs_field.default.metadata includes Gt(gt=0); block_size=13 is admitted.
+assert CacheConfig(block_size=13).block_size == 13
+
+class _MO16Backend(AttentionBackend):
+    @staticmethod
+    def get_supported_kernel_block_sizes(): return [MultipleOf(16)]
+    # ...rest stubbed for the predicate test...
+
+assert _MO16Backend.supports_block_size(13)  is False
+assert _MO16Backend.supports_block_size(16)  is True
+assert _MO16Backend.supports_block_size(24)  is False
+assert _MO16Backend.supports_block_size(32)  is True
+```
+
+Reproduced in the same sandbox install used for prior findings.
+
+### Severity
+
+**No live bug**. The post-#43794 chain rejects every non-conforming `--block-size N` cleanly, either at backend selection (`ValueError` naming the reasons) or via downstream defensive assertions that name the violating values. Strictly better UX than #43842's bare-`AssertionError` shape: every rejection path carries enough information for the user to diagnose the cause. Closure for this Tier-2 row.
+
+### Filing decision
+
+Not filed upstream. No defect to fix; the chain is sound.
+
 ## Out of scope (this audit)
 
 - **Argparse `int` parameters not declared `SkipValidation`**. ~~Many of these have `Field(gt=0)` or similar Pydantic constraints; some may not. A broader audit covering all of `arg_utils.py`'s `int` flags is queued for ROADMAP Tier 2 follow-up.~~ ✅ Shipped (above).

@@ -160,6 +160,21 @@ TARGETS: list[Target] = [
         safety_expected=None,
     ),
     Target(
+        # Tier-2 leftover (ROADMAP.md row): --block-size N for
+        # non-power-of-2 N. **Not a live-bug target** -- post-#43794
+        # the backend-selection chain (validate_configuration ->
+        # supports_block_size) rejects every non-conforming value
+        # cleanly. This entry verifies the kernel-block-size
+        # predicate's contract (soundness + completeness of the
+        # `block_size % K == 0` characterisation) over symbolic
+        # block_size and K. Phase 1 + Phase 2 SUCCESSFUL is the
+        # intended verdict; closes the Tier-2 hunt for this row.
+        name="block_size_non_power_of_2_supports",
+        entry="block_size_non_power_of_2_supports.py",
+        expected="SUCCESSFUL",
+        safety_expected="SUCCESSFUL",
+    ),
+    Target(
         # Seventh live-bug candidate from the broader audit:
         # --long-prefill-token-threshold <negative> CLI path.
         # SchedulerConfig accepts any int; __post_init__ only
