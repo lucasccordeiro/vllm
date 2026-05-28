@@ -74,6 +74,8 @@ engine. Structure mirrors the AWS-Neuron NKI PoC (see
 | 9 | `--hash-block-size -k` propagation | `vllm/v1/core/kv_cache_utils.py:660-680` (first-request infinite loop in `request_block_hasher`) |
 | 10 | `--max-model-len 0` CLI path | `vllm/engine/arg_utils.py:802` → `vllm/v1/core/sched/scheduler.py:397` (negative `num_new_tokens` propagates silently into KV-cache arithmetic) |
 | 11 | `--num-gpu-blocks-override 0` CLI path | `vllm/engine/arg_utils.py:1126` → `vllm/v1/core/block_pool.py:157` (bare `AssertionError` on `num_gpu_blocks > 0`) |
+| 12 | `--max-logprobs <negative>` CLI path | `vllm/engine/arg_utils.py:525` → `vllm/sampling_params.py:713` (silent acceptance of every negative except the `-1` sentinel) |
+| 13 | `--long-prefill-token-threshold <negative>` CLI path | `vllm/engine/arg_utils.py:1386` → `vllm/v1/core/sched/scheduler.py:395` (`0 < threshold < num_new_tokens` guard silently no-ops on negatives) |
 
 Targets 1–3 are pure integer helpers with explicit preconditions;
 both the non-buggy and buggy entries are toy contracts that
@@ -420,7 +422,9 @@ every non-buggy entry has > 0.
 | `hash_block_size_zero_cli_path` | **FAILED (live bug witness, [vllm-project/vllm#43521](https://github.com/vllm-project/vllm/issues/43521), fixed upstream by [#43794](https://github.com/vllm-project/vllm/pull/43794))** | skipped                  | 2    |
 | `hash_block_size_negative_propagation` | **FAILED (live bug witness, infinite loop in `request_block_hasher`; incidentally closed by the `gt=0` constraint shipped in [#43794](https://github.com/vllm-project/vllm/pull/43794))** | skipped         | 1    |
 | `max_model_len_zero_cli_path` | **FAILED (live bug witness, [vllm-project/vllm#43532](https://github.com/vllm-project/vllm/issues/43532), fixed upstream by [#43794](https://github.com/vllm-project/vllm/pull/43794))** | skipped         | 1    |
-| `num_gpu_blocks_override_zero_cli_path` | **FAILED (live bug witness, bare `AssertionError` at `block_pool.py:157`)** | skipped         | 1    |
+| `num_gpu_blocks_override_zero_cli_path` | **FAILED (live bug witness, [vllm-project/vllm#43842](https://github.com/vllm-project/vllm/issues/43842), bare `AssertionError` at `block_pool.py:157`)** | skipped         | 1    |
+| `max_logprobs_negative_cli_path` | **FAILED (silent-config-acceptance witness; field admits any negative besides the `-1` sentinel, surfacing either a confusing "max allowed: -5" error or a pure no-op depending on whether requests opt into logprobs)** | skipped         | 1    |
+| `long_prefill_token_threshold_negative_cli_path` | **FAILED (silent-config-acceptance witness; field admits any negative, scheduler.py:395 guard `0 < threshold < num_new_tokens` silently no-ops, user-set cap has zero effect)** | skipped         | 1    |
 | `next_power_of_2`          | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 5    |
 | `next_power_of_2_buggy`    | FAILED (expected)             | skipped                      | 5    |
 | `largest_power_of_2_divisor`       | SUCCESSFUL (expected) | SUCCESSFUL (expected)        | 39   |

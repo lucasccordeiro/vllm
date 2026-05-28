@@ -145,6 +145,32 @@ TARGETS: list[Target] = [
         expected="FAILED",
         safety_expected=None,
     ),
+    Target(
+        # Sixth live-bug candidate from the broader audit:
+        # --max-logprobs <negative> CLI path. ModelConfig accepts
+        # any int (field is `int = 20`, no gt=/ge= constraint);
+        # only the `-1` sentinel is rewritten to vocab_size in the
+        # validator. Other negatives survive silently and either
+        # surface as a confusing "max allowed: -5" error for
+        # logprob-requesting traffic or are a pure no-op for
+        # logprob-free traffic.
+        name="max_logprobs_negative_cli_path",
+        entry="max_logprobs_negative_cli_path.py",
+        expected="FAILED",
+        safety_expected=None,
+    ),
+    Target(
+        # Seventh live-bug candidate from the broader audit:
+        # --long-prefill-token-threshold <negative> CLI path.
+        # SchedulerConfig accepts any int; __post_init__ only
+        # rewrites the `== 0` sentinel; scheduler.py:395 guards
+        # the clamp with `0 < threshold`, so negatives silently
+        # no-op. User-set cap has zero effect on scheduling.
+        name="long_prefill_token_threshold_negative_cli_path",
+        entry="long_prefill_token_threshold_negative_cli_path.py",
+        expected="FAILED",
+        safety_expected=None,
+    ),
     # The next four targets use loop reimplementations of upstream's
     # bit-trick functions (see harness headers for the equivalence
     # argument). --unwind 32 covers the longest loop the
