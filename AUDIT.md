@@ -202,8 +202,8 @@ These are set from model config / engine state, not directly by the user, but th
 
 1. ~~**`--num-gpu-blocks-override 0` / negative**~~ — ✅ **Shipped and confirmed live** (this commit). Harness `harness/num_gpu_blocks_override_zero_cli_path.py`; ESBMC counterexample at `num_gpu_blocks_override = 0` with `profiled = 1` → `num_blocks = 0` → `assert num_blocks > 0` fires. Empirical chain (`CacheConfig(num_gpu_blocks_override=0).num_gpu_blocks_override == 0`; `may_override_num_blocks(_, 4096) → 0`; `BlockPool(num_gpu_blocks=0) → AssertionError`) confirms. Detailed write-up in Finding #4 below.
 2. ~~**`--max-model-len 0`**~~ — ✅ **Shipped and confirmed live** (this commit). Harness `harness/max_model_len_zero_cli_path.py`; ESBMC counterexample at `max_model_len = 0, num_computed_tokens = 0, num_new_tokens = 1` produces `num_new_tokens = -1` at scheduler.py:397. Empirical chain (`_get_and_verify_max_len(0) = 0`; `min(1, -1) = -1`; `cdiv(-1, 16) = 0`) confirms the silent propagation. Detailed write-up in §3 below.
-3. `--max-logprobs` negative — easy to harness; smaller blast radius.
-4. `--long-prefill-token-threshold` negative — model is small but the guard is suggestive of a "treat 0 as off" intent that negatives slip past.
+3. ~~**`--max-logprobs` negative**~~ — ✅ **Shipped, confirmed live as a silent-config-acceptance defect** (this commit). Harness `harness/max_logprobs_negative_cli_path.py`; ESBMC counterexample at `max_logprobs = -2` produces `effective = -2` (sentinel-rewrite branch fires only for `-1`); assertion `effective >= 0` fails. Empirical reproduction confirms two distinct failure modes depending on per-request shape: a confusing "max allowed: -5" error for logprob-requesting traffic, and a pure no-op for logprob-free traffic. Cosmetic blast radius; same field-level admission shape as #43521 / #43532 / #43842. Detailed write-up in Finding #5 below.
+4. ~~**`--long-prefill-token-threshold` negative**~~ — ✅ **Shipped, confirmed live as a silent-config-acceptance defect** (this commit). Harness `harness/long_prefill_token_threshold_negative_cli_path.py`; ESBMC counterexample at `threshold = -1, num_new_tokens = 2^30` shows the scheduler.py:395 guard `0 < threshold < num_new_tokens` silently no-ops, leaving `num_new_tokens` unchanged. Empirical chain (`SchedulerConfig(long_prefill_token_threshold=-5, ...).long_prefill_token_threshold == -5`; scheduler guard skipped) confirms. The user-set cap has zero observable effect on scheduling. Detailed write-up in Finding #6 below.
 
 Each item is queued as a follow-up Tier 2 harness in [`ROADMAP.md`](./ROADMAP.md).
 
@@ -385,6 +385,200 @@ Replace the bare assertion with an early validator on `CacheConfig`. Two natural
 2. **Constructor-level** — replace the bare `assert` in `BlockPool.__init__` with a `raise ValueError(...)` carrying a descriptive message. Faster to land but only improves the diagnostic; doesn't prevent the engine from getting this far.
 
 (1) is preferred because it short-circuits the bad config at construction time, mirroring the pattern in #43794 / proposed for #43521 and #43532.
+
+## Finding #5 — `--max-logprobs <negative>` silent-config-acceptance
+
+**Filing decision**: not filed upstream yet. Severity is cosmetic (see *Severity* below); decision deferred pending a bundled "config-validation tightening" PR rather than a one-off issue. Logged here for completeness and as evidence the broader-audit methodology continues to surface the same field-level admission shape across the codebase.
+
+### Trace
+
+1. **CLI** (`vllm/engine/arg_utils.py:525, :821`): `--max-logprobs` is wired to `ModelConfig.max_logprobs` via the standard `get_kwargs(ModelConfig)` derivation. The field is declared `int = 20` at `vllm/config/model.py:234` with no `Field(gt=0)` / `ge=0` constraint; argparse coerces any int and Pydantic admits it without complaint.
+
+2. **Validator** (`vllm/sampling_params.py:713`, `_validate_logprobs`):
+
+   ```python
+   max_logprobs = model_config.max_logprobs
+   if max_logprobs == -1:
+       max_logprobs = model_config.get_vocab_size()
+   if num_logprobs := self.logprobs:
+       if num_logprobs == -1:
+           num_logprobs = model_config.get_vocab_size()
+       if num_logprobs > max_logprobs:
+           raise VLLMValidationError(
+               f"Requested sample logprobs of {num_logprobs}, "
+               f"which is greater than max allowed: {max_logprobs}",
+               ...,
+           )
+   ```
+
+   The `== -1` branch is the documented "auto = vocab size" sentinel; every other negative is left unchanged. The downstream comparison `num_logprobs > max_logprobs` is numerically correct for negative caps but the error message exposes the malformed value (`"max allowed: -5"`).
+
+3. **Silent-acceptance side**: a request that does NOT ask for logprobs (`self.logprobs is None` or `self.logprobs == 0`) skips the validator entirely (the walrus `if num_logprobs := self.logprobs:` is falsy in both cases). For logprob-free traffic the malformed `--max-logprobs -5` setting has zero observable effect.
+
+### ESBMC counterexample
+
+Phase 1, `vcc=1`, FAILED:
+
+```
+Violated property:
+  file harness/max_logprobs_negative_cli_path.py line ... function main
+  assertion effective >= 0
+
+  max_logprobs = -2
+  vocab_size = 1073741824
+  effective = -2
+```
+
+The `-1` sentinel-rewrite branch is skipped (input is `-2`, not `-1`); the symbolic vocab size never reaches `effective`; the assertion that the post-sentinel cap should be non-negative is violated.
+
+### Empirical reproduction
+
+```python
+import dataclasses
+from vllm.config.model import ModelConfig
+
+ml = next(f for f in dataclasses.fields(ModelConfig) if f.name == "max_logprobs")
+assert dict(ml.metadata) == {}                # no Pydantic constraint
+
+# Modelling vllm/sampling_params.py:713-728 with cap = -5.
+def validate_logprobs(cap, user_logprobs, vocab_size=32000):
+    if cap == -1:
+        cap = vocab_size
+    if num := user_logprobs:
+        if num == -1:
+            num = vocab_size
+        if num > cap:
+            raise ValueError(
+                f"Requested sample logprobs of {num}, "
+                f"which is greater than max allowed: {cap}"
+            )
+
+try:
+    validate_logprobs(cap=-5, user_logprobs=3)
+except ValueError as e:
+    assert "max allowed: -5" in str(e)        # case A: confusing UX
+validate_logprobs(cap=-5, user_logprobs=None) # case B: silent no-op
+```
+
+Both cases observed in the sandbox install used for prior findings.
+
+### Severity
+
+Smallest of the broader-audit findings. The malformed value never reaches integer-arithmetic call sites (e.g. tensor slicing in `vllm/v1/sample/sampler.py`) because the validator intercepts it for logprob-requesting traffic and the no-logprob path ignores it. Two failure shapes:
+
+- *Logprob-requesting traffic*: the request is rejected, but the error message exposes the malformed cap to the end user ("max allowed: -5"). Confusing rather than dangerous.
+- *Logprob-free traffic*: the engine accepts the malformed `--max-logprobs` and produces no signal that the flag was ineffective.
+
+Cosmetic UX defect of the same family as #43521 / #43532 / #43842; same field-level admission shape; identical one-line fix shape.
+
+### Proposed fix
+
+Mirror the pattern landed in #43794 for the other broader-audit fields:
+
+```python
+@field_validator("max_logprobs", mode="after")
+@classmethod
+def _check_max_logprobs(cls, v):
+    if v == -1 or v >= 0:
+        return v
+    raise ValueError(
+        f"max_logprobs must be a non-negative integer or -1 "
+        f"(auto-derive to vocab size), got {v}."
+    )
+```
+
+## Finding #6 — `--long-prefill-token-threshold <negative>` silent-config-acceptance
+
+**Filing decision**: not filed upstream yet. Severity is cosmetic (silent no-op rather than crash or silent corruption). Logged here; will be bundled into the same "config-validation tightening" follow-up as Finding #5 if upstream accepts that shape.
+
+### Trace
+
+1. **CLI** (`vllm/engine/arg_utils.py:523, :1386`): `--long-prefill-token-threshold` is wired to `SchedulerConfig.long_prefill_token_threshold` via the standard `get_kwargs(SchedulerConfig)` derivation. The field is declared `int = 0` at `vllm/config/scheduler.py:80` with no `Field(ge=0)` constraint; argparse coerces any int and Pydantic admits it without complaint.
+
+2. **`SchedulerConfig.__post_init__`** (`vllm/config/scheduler.py:224-256`): the only field-touching branches are
+
+   ```python
+   if is_encoder_decoder:
+       self.long_prefill_token_threshold = 0
+   ...
+   if self.max_num_partial_prefills > 1:
+       if self.long_prefill_token_threshold == 0:
+           self.long_prefill_token_threshold = int(max_model_len * 0.04)
+   ```
+
+   A negative threshold survives both branches unchanged (it is not `== 0` and the encoder-decoder branch fires only for encoder-decoder models). The downstream sanity check at line 295 (`if self.long_prefill_token_threshold > max_model_len: raise ValueError(...)`) catches only the too-large case; negatives slip past silently. The mamba-cache constraint at `vllm/config/vllm.py:2079` (`if self.scheduler_config.long_prefill_token_threshold > 0: assert ... >= block_size`) is also guarded by `> 0`; negatives skip this assertion.
+
+3. **Scheduler guard** (`vllm/v1/core/sched/scheduler.py:395`):
+
+   ```python
+   if 0 < self.scheduler_config.long_prefill_token_threshold < num_new_tokens:
+       num_new_tokens = self.scheduler_config.long_prefill_token_threshold
+   ```
+
+   For any negative threshold `T`, the conjunction `0 < T` is `False`, so the clamp branch is skipped. The user-set cap has zero effect on scheduling — semantically identical to the documented `0`-sentinel "off" mode, but the user's CLI input was not zero. No signal is emitted to indicate the flag was ineffective.
+
+### ESBMC counterexample
+
+Phase 1, `vcc=1`, FAILED:
+
+```
+Violated property:
+  file harness/long_prefill_token_threshold_negative_cli_path.py line ... function main
+  assertion num_new_tokens < original
+
+  threshold = -1
+  num_new_tokens = 1073741824
+  original = 1073741824
+```
+
+The user-set cap (`-1`) was admitted by the config layer; the scheduler guard's `0 < threshold` conjunct is `False` for any negative; `num_new_tokens` is not clamped, contradicting the user's stated intent.
+
+### Empirical reproduction
+
+```python
+import dataclasses
+from vllm.config.scheduler import SchedulerConfig
+
+lp = next(f for f in dataclasses.fields(SchedulerConfig)
+          if f.name == "long_prefill_token_threshold")
+assert dict(lp.metadata) == {}                # no Pydantic constraint
+
+sc = SchedulerConfig(
+    long_prefill_token_threshold=-5,
+    max_model_len=4096,
+    is_encoder_decoder=False,
+)
+assert sc.long_prefill_token_threshold == -5  # stored verbatim
+
+# Inline of vllm/v1/core/sched/scheduler.py:395 with the bad value.
+threshold, num_new_tokens = sc.long_prefill_token_threshold, 1024
+original = num_new_tokens
+if 0 < threshold < num_new_tokens:
+    num_new_tokens = threshold
+assert num_new_tokens == original             # guard skipped; cap ignored
+```
+
+Confirmed in the same sandbox install used for the other findings.
+
+### Severity
+
+Cosmetic — strictly weaker than #43842. There is no `AssertionError`, no traceback, no negative arithmetic in a hot path: the malformed CLI input is simply a no-op for scheduling decisions. The user receives zero signal that their flag did nothing. Same silent-config-acceptance family as Finding #5.
+
+### Proposed fix
+
+Same pattern as Finding #5 — add a `field_validator` on `SchedulerConfig.long_prefill_token_threshold`:
+
+```python
+@field_validator("long_prefill_token_threshold", mode="after")
+@classmethod
+def _check_long_prefill_token_threshold(cls, v):
+    if v < 0:
+        raise ValueError(
+            f"long_prefill_token_threshold must be >= 0 "
+            f"(0 = off, > 0 = clamp), got {v}."
+        )
+    return v
+```
 
 ## Out of scope (this audit)
 
