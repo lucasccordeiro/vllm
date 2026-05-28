@@ -62,9 +62,7 @@ Already documented as a shipped target. See [`REPORT.md` §7](./REPORT.md) and [
 
 4. **Downstream consumers** of the resolver's `hash_block_size` (`vllm/v1/core/kv_cache_coordinator.py:429-431`, `vllm/v1/kv_offload/base.py:363`): each performs a `%`-against-`hash_block_size`. If by any path a non-positive value escaped the resolver, they would crash too — but step 3 is the first crash site for the `--hash-block-size 0` input.
 
-### Adjacent failure mode: `--hash-block-size <negative>`
-
-Confirmed and reproduced as a separate live finding; analysis, ESBMC counterexample, and sandbox reproducer are below in *Adjacent failure mode — `--hash-block-size -k` (k ≥ 1)*.
+(The adjacent `--hash-block-size <negative>` case is a separate, distinct failure mode — written up in full at the end of this finding.)
 
 ### Severity
 
@@ -200,12 +198,14 @@ These are set from model config / engine state, not directly by the user, but th
 
 ### Priority for harness work
 
-1. ~~**`--num-gpu-blocks-override 0` / negative**~~ — ✅ **Shipped, confirmed live, filed as [vllm-project/vllm#43842](https://github.com/vllm-project/vllm/issues/43842)**. Harness `harness/num_gpu_blocks_override_zero_cli_path.py`; ESBMC counterexample at `num_gpu_blocks_override = 0` with `profiled = 1` → `num_blocks = 0` → `assert num_blocks > 0` fires. Empirical chain (`CacheConfig(num_gpu_blocks_override=0).num_gpu_blocks_override == 0`; `may_override_num_blocks(_, 4096) → 0`; `BlockPool(num_gpu_blocks=0) → AssertionError`) confirms. Detailed write-up in Finding #4 below.
-2. ~~**`--max-model-len 0`**~~ — ✅ **Shipped and confirmed live** (this commit). Harness `harness/max_model_len_zero_cli_path.py`; ESBMC counterexample at `max_model_len = 0, num_computed_tokens = 0, num_new_tokens = 1` produces `num_new_tokens = -1` at scheduler.py:397. Empirical chain (`_get_and_verify_max_len(0) = 0`; `min(1, -1) = -1`; `cdiv(-1, 16) = 0`) confirms the silent propagation. Detailed write-up in §3 below.
-3. ~~**`--max-logprobs` negative**~~ — ✅ **Shipped, confirmed live as a silent-config-acceptance defect** (this commit). Harness `harness/max_logprobs_negative_cli_path.py`; ESBMC counterexample at `max_logprobs = -2` produces `effective = -2` (sentinel-rewrite branch fires only for `-1`); assertion `effective >= 0` fails. Empirical reproduction confirms two distinct failure modes depending on per-request shape: a confusing "max allowed: -5" error for logprob-requesting traffic, and a pure no-op for logprob-free traffic. Cosmetic blast radius; same field-level admission shape as #43521 / #43532 / #43842. Detailed write-up in Finding #5 below.
-4. ~~**`--long-prefill-token-threshold` negative**~~ — ✅ **Shipped, confirmed live as a silent-config-acceptance defect** (this commit). Harness `harness/long_prefill_token_threshold_negative_cli_path.py`; ESBMC counterexample at `threshold = -1, num_new_tokens = 2^30` shows the scheduler.py:395 guard `0 < threshold < num_new_tokens` silently no-ops, leaving `num_new_tokens` unchanged. Empirical chain (`SchedulerConfig(long_prefill_token_threshold=-5, ...).long_prefill_token_threshold == -5`; scheduler guard skipped) confirms. The user-set cap has zero observable effect on scheduling. Detailed write-up in Finding #6 below.
+All four candidates have since been harnessed and confirmed live; the
+ESBMC counterexamples, empirical chains, and fix status are in their
+dedicated finding sections below (referenced here only by outcome):
 
-Each item is queued as a follow-up Tier 2 harness in [`ROADMAP.md`](./ROADMAP.md).
+1. ~~**`--num-gpu-blocks-override 0` / negative**~~ — ✅ filed as [vllm-project/vllm#43842](https://github.com/vllm-project/vllm/issues/43842) (open). See **Finding #4**.
+2. ~~**`--max-model-len 0`**~~ — ✅ filed as [vllm-project/vllm#43532](https://github.com/vllm-project/vllm/issues/43532), fixed upstream by [#43794](https://github.com/vllm-project/vllm/pull/43794). See **Finding #3**.
+3. ~~**`--max-logprobs` negative**~~ — ✅ silent-config-acceptance defect; not filed (cosmetic blast radius). See **Finding #5**.
+4. ~~**`--long-prefill-token-threshold` negative**~~ — ✅ silent-config-acceptance defect; not filed. See **Finding #6**.
 
 ## Finding #3 — `--max-model-len 0` silent negative-num_new_tokens propagation
 
