@@ -78,6 +78,7 @@ engine. Structure mirrors the AWS-Neuron NKI PoC (see
 | 13 | `--long-prefill-token-threshold <negative>` CLI path | `vllm/engine/arg_utils.py:1386` → `vllm/v1/core/sched/scheduler.py:395` (`0 < threshold < num_new_tokens` guard silently no-ops on negatives) |
 | 14 | `FreeKVCacheBlockQueue.popleft_n` at concrete K = 4 | `vllm/v1/core/kv_cache_utils.py:253` (first Tier-3 data-structure target; doubly-linked-list modelled via parallel int arrays with integer sentinels for `None` / `HEAD` / `TAIL`) |
 | 15 | `FreeKVCacheBlockQueue.append_n` at concrete K = 4 | `vllm/v1/core/kv_cache_utils.py:329` (second Tier-3 data-structure target; inverse of popleft_n, same stub shape) |
+| 16 | `BlockPool.get_new_blocks` at concrete K = 4 | `vllm/v1/core/block_pool.py` (Tier-3 row 4; first ref-counting layer — free-list pop + per-block `ref_cnt 0 → 1`, raise-on-insufficient guard, no-double-return) |
 
 Targets 1–3 are pure integer helpers with explicit preconditions;
 both the non-buggy and buggy entries are toy contracts that
@@ -431,6 +432,8 @@ every non-buggy entry has > 0.
 | `free_kv_cache_block_queue_popleft_n_buggy`      | FAILED (expected; prev[curr] = HEAD reconnect dropped, postcondition P3 violated) | skipped | 1481 |
 | `free_kv_cache_block_queue_append_n` (K = 4)     | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 1602 |
 | `free_kv_cache_block_queue_append_n_buggy`       | FAILED (expected; fake_tail_prev = last rewire dropped, postcondition P5 violated) | skipped | 1065 |
+| `block_pool_get_new_blocks` (K = 4)              | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 3168 |
+| `block_pool_get_new_blocks_buggy`                | FAILED (expected; non-advancing pop returns a block twice, production `assert block.ref_cnt == 0` violated) | skipped | 1286 |
 | `next_power_of_2`          | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 5    |
 | `next_power_of_2_buggy`    | FAILED (expected)             | skipped                      | 5    |
 | `largest_power_of_2_divisor`       | SUCCESSFUL (expected) | SUCCESSFUL (expected)        | 39   |
