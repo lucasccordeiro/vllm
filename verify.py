@@ -186,6 +186,69 @@ TARGETS: list[Target] = [
         expected="FAILED",
         safety_expected=None,
     ),
+    # Tier-3 data-structure targets at concrete K = 4. First
+    # harnesses to model a non-trivial structure (doubly-linked
+    # free-list with fake head/tail sentinels). Represent the
+    # linked structure as parallel int arrays with sentinel
+    # values (NIL = -1, HEAD = 4, TAIL = 5) to sidestep ESBMC-
+    # Python's Optional/None and nested-attribute gaps. --unwind 5
+    # covers the K-bounded loop. The non-buggy variants run in
+    # ~10-35 s each; the buggy variants halt fast on the first
+    # counterexample.
+    Target(
+        name="free_kv_cache_block_queue_popleft_n",
+        entry="free_kv_cache_block_queue_popleft_n.py",
+        esbmc_args=("--unwind", "5"),
+        expected="SUCCESSFUL",
+        safety_expected="SUCCESSFUL",
+    ),
+    Target(
+        name="free_kv_cache_block_queue_popleft_n_buggy",
+        entry="free_kv_cache_block_queue_popleft_n_buggy.py",
+        esbmc_args=("--unwind", "5"),
+        expected="FAILED",
+        safety_expected=None,
+    ),
+    Target(
+        name="free_kv_cache_block_queue_append_n",
+        entry="free_kv_cache_block_queue_append_n.py",
+        esbmc_args=("--unwind", "5"),
+        expected="SUCCESSFUL",
+        safety_expected="SUCCESSFUL",
+    ),
+    Target(
+        name="free_kv_cache_block_queue_append_n_buggy",
+        entry="free_kv_cache_block_queue_append_n_buggy.py",
+        esbmc_args=("--unwind", "5"),
+        expected="FAILED",
+        safety_expected=None,
+    ),
+    Target(
+        name="block_pool_get_new_blocks",
+        entry="block_pool_get_new_blocks.py",
+        esbmc_args=("--unwind", "5"),
+        expected="SUCCESSFUL",
+        safety_expected="SUCCESSFUL",
+    ),
+    Target(
+        name="block_pool_get_new_blocks_buggy",
+        entry="block_pool_get_new_blocks_buggy.py",
+        esbmc_args=("--unwind", "5"),
+        expected="FAILED",
+        safety_expected=None,
+    ),
+    Target(
+        name="kv_cache_manager_allocate_slots",
+        entry="kv_cache_manager_allocate_slots.py",
+        expected="SUCCESSFUL",
+        safety_expected="SUCCESSFUL",
+    ),
+    Target(
+        name="kv_cache_manager_allocate_slots_buggy",
+        entry="kv_cache_manager_allocate_slots_buggy.py",
+        expected="FAILED",
+        safety_expected=None,
+    ),
     # The next four targets use loop reimplementations of upstream's
     # bit-trick functions (see harness headers for the equivalence
     # argument). --unwind 32 covers the longest loop the
