@@ -76,6 +76,8 @@ engine. Structure mirrors the AWS-Neuron NKI PoC (see
 | 11 | `--num-gpu-blocks-override 0` CLI path | `vllm/engine/arg_utils.py:1126` → `vllm/v1/core/block_pool.py:157` (bare `AssertionError` on `num_gpu_blocks > 0`) |
 | 12 | `--max-logprobs <negative>` CLI path | `vllm/engine/arg_utils.py:525` → `vllm/sampling_params.py:713` (silent acceptance of every negative except the `-1` sentinel) |
 | 13 | `--long-prefill-token-threshold <negative>` CLI path | `vllm/engine/arg_utils.py:1386` → `vllm/v1/core/sched/scheduler.py:395` (`0 < threshold < num_new_tokens` guard silently no-ops on negatives) |
+| 14 | `FreeKVCacheBlockQueue.popleft_n` at concrete K = 4 | `vllm/v1/core/kv_cache_utils.py:253` (first Tier-3 data-structure target; doubly-linked-list modelled via parallel int arrays with integer sentinels for `None` / `HEAD` / `TAIL`) |
+| 15 | `FreeKVCacheBlockQueue.append_n` at concrete K = 4 | `vllm/v1/core/kv_cache_utils.py:329` (second Tier-3 data-structure target; inverse of popleft_n, same stub shape) |
 
 Targets 1–3 are pure integer helpers with explicit preconditions;
 both the non-buggy and buggy entries are toy contracts that
@@ -425,12 +427,16 @@ every non-buggy entry has > 0.
 | `num_gpu_blocks_override_zero_cli_path` | **FAILED (live bug witness, [vllm-project/vllm#43842](https://github.com/vllm-project/vllm/issues/43842), bare `AssertionError` at `block_pool.py:157`)** | skipped         | 1    |
 | `max_logprobs_negative_cli_path` | **FAILED (silent-config-acceptance witness; field admits any negative besides the `-1` sentinel, surfacing either a confusing "max allowed: -5" error or a pure no-op depending on whether requests opt into logprobs)** | skipped         | 1    |
 | `long_prefill_token_threshold_negative_cli_path` | **FAILED (silent-config-acceptance witness; field admits any negative, scheduler.py:395 guard `0 < threshold < num_new_tokens` silently no-ops, user-set cap has zero effect)** | skipped         | 1    |
+| `free_kv_cache_block_queue_popleft_n` (K = 4)    | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 2321 |
+| `free_kv_cache_block_queue_popleft_n_buggy`      | FAILED (expected; prev[curr] = HEAD reconnect dropped, postcondition P3 violated) | skipped | 1481 |
+| `free_kv_cache_block_queue_append_n` (K = 4)     | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 1602 |
+| `free_kv_cache_block_queue_append_n_buggy`       | FAILED (expected; fake_tail_prev = last rewire dropped, postcondition P5 violated) | skipped | 1065 |
 | `next_power_of_2`          | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 5    |
 | `next_power_of_2_buggy`    | FAILED (expected)             | skipped                      | 5    |
 | `largest_power_of_2_divisor`       | SUCCESSFUL (expected) | SUCCESSFUL (expected)        | 39   |
 | `largest_power_of_2_divisor_buggy` | FAILED (expected)     | skipped                      | 39   |
 
-Wall-clock: ~83 s for `make verify` end-to-end on aarch64 macOS.
+Wall-clock: ~3 min 12 s for `make verify` end-to-end on aarch64 macOS at the current 23-target count; the four Tier-3 data-structure targets at K = 4 dominate (each non-buggy variant generates ~1600–2300 VCCs and runs ~10–35 s per phase).
 
 The four `*_power_of_2*` targets use loop reimplementations
 because ESBMC's Python frontend does not yet terminate on
