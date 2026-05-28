@@ -31,8 +31,8 @@ Two `SkipValidation[int]` fields total. The rest are non-int and out of scope pe
 
 | # | Field | Severity | Status |
 |---|---|---|---|
-| 1 | `CacheConfig.block_size` | **Live, CLI-reachable** (filed: [vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496); candidate fix: [vllm-project/vllm#43514](https://github.com/vllm-project/vllm/pull/43514)) | Already shipped as the `block_size_zero_cli_path` target. Closes when #43514 merges. |
-| 2 | `CacheConfig.hash_block_size` | **Live, CLI-reachable, reproduced, filed** | Filed as [vllm-project/vllm#43521](https://github.com/vllm-project/vllm/issues/43521). Harness `hash_block_size_zero_cli_path.py` produces the CWE-369 counterexample; an empirical sandbox reproducer hits the exact crash at `vllm/v1/core/kv_cache_utils.py:628`. |
+| 1 | `CacheConfig.block_size` | **Live, CLI-reachable, fixed upstream** (filed: [vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496); fixed: [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794), merged 2026-05-27) | Shipped as the `block_size_zero_cli_path` target. Closed by #43794, which replaces `SkipValidation[int]` with `Field(default=None, gt=0)`. |
+| 2 | `CacheConfig.hash_block_size` | **Live, CLI-reachable, reproduced, filed, fixed upstream** | Filed as [vllm-project/vllm#43521](https://github.com/vllm-project/vllm/issues/43521); fixed upstream by [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794) (merged 2026-05-27) with the same `Field(default=None, gt=0)` shape applied to `hash_block_size: int \| None`. The `gt=0` constraint also rejects negative values, incidentally closing the adjacent `--hash-block-size -k` propagation finding. Harness `hash_block_size_zero_cli_path.py` produces the CWE-369 counterexample; an empirical sandbox reproducer hits the exact crash at `vllm/v1/core/kv_cache_utils.py:628`. |
 
 ## Finding #1 — `CacheConfig.block_size`
 
@@ -68,11 +68,11 @@ Confirmed and reproduced as a separate live finding; analysis, ESBMC counterexam
 
 ### Severity
 
-UX defect of the same class as #43496: a CLI-supplied invalid value produces an internal `ZeroDivisionError` traceback instead of a clean error. Low security risk; one-line fix shape is identical to #43514.
+UX defect of the same class as #43496: a CLI-supplied invalid value produces an internal `ZeroDivisionError` traceback instead of a clean error. Low security risk; one-line fix shape is identical to #43794.
 
 ### Proposed fix
 
-Mirror #43514: add an explicit non-positive-int check in either `CacheConfig._apply_block_size_default` (extending it to cover `hash_block_size` too) or in `resolve_kv_cache_block_sizes` before line 627:
+Mirror #43794: add an explicit non-positive-int check in either `CacheConfig._apply_block_size_default` (extending it to cover `hash_block_size` too) or in `resolve_kv_cache_block_sizes` before line 627:
 
 ```python
 if requested is not None and requested <= 0:
@@ -115,6 +115,7 @@ early-return at `kv_cache_utils.py:577` and are unaffected.
 1. ✅ Harness shipped (`harness/hash_block_size_zero_cli_path.py`).
 2. ✅ Empirical reproduction confirms the static counterexample.
 3. ✅ Filed upstream as [vllm-project/vllm#43521](https://github.com/vllm-project/vllm/issues/43521) with both witnesses + the one-line fix proposal.
+4. ✅ Fixed upstream by [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794) (merged 2026-05-27): `hash_block_size: int | None = Field(default=None, gt=0)`. The `gt=0` constraint also closes the adjacent `--hash-block-size -k` negative-propagation case (no separate issue needed).
 
 ### Adjacent failure mode — `--hash-block-size -k` (k ≥ 1): silent propagation → request_block_hasher infinite loop
 
@@ -156,7 +157,9 @@ INFINITE LOOP confirmed: hasher did not terminate within 3 s
 
 Severity: same UX class as #43521 (CLI-supplied invalid value, internal failure mode) but harder to diagnose — server boots cleanly, then hangs on the first request, with `new_block_hashes` growing unboundedly. The same one-line fix proposed for #43521 (`if hash_block_size is not None and hash_block_size <= 0: raise ...`) closes this too.
 
-Filing decision: separate upstream issue (this section's analysis goes into the body) rather than a #43521 comment, because the failure modes are distinct enough that maintainers may want them tracked separately for triage and tests. Issue draft is prepared in the corresponding PR.
+Filing decision: separate upstream issue (this section's analysis goes into the body) rather than a #43521 comment, because the failure modes are distinct enough that maintainers may want them tracked separately for triage and tests. Issue draft was prepared in the corresponding PR.
+
+**Update (2026-05-27):** A separate issue turned out not to be necessary. The fix landed for #43521 in upstream PR [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794) adds `gt=0` to `CacheConfig.hash_block_size`, which rejects 0 *and* every negative value at config-construction time. The first-request infinite loop described above is no longer reachable from the CLI on post-#43794 vLLM.
 
 ## Broader audit — argparse-settable `int` fields without `SkipValidation`
 
@@ -206,7 +209,7 @@ Each item is queued as a follow-up Tier 2 harness in [`ROADMAP.md`](./ROADMAP.md
 
 ## Finding #3 — `--max-model-len 0` silent negative-num_new_tokens propagation
 
-**Filed**: [vllm-project/vllm#43532](https://github.com/vllm-project/vllm/issues/43532) (open, labelled `bug`).
+**Filed**: [vllm-project/vllm#43532](https://github.com/vllm-project/vllm/issues/43532) (**closed**, fixed upstream by [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794), merged 2026-05-27).
 
 ### Trace
 
@@ -277,6 +280,19 @@ Tighten the Field constraint from `ge=-1` to a more specific predicate. Two natu
    ```
 
 2. **Two-sided constraint**: replace `ge=-1` with an explicit "must be positive or exactly -1" check; `Field(ge=-1, ne=0)` if Pydantic supports it (it doesn't out of the box; need the validator).
+
+### Landed fix
+
+Upstream [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794) (merged 2026-05-27) took a third shape: tighten the post-resolution check in `validate_model_config_after` (`vllm/config/model.py`) to additionally require `self.max_model_len >= 1`:
+
+```python
+if not isinstance(self.max_model_len, int) or self.max_model_len < 1:
+    raise ValueError(
+        f"max_model_len must be a positive integer, ..."
+    )
+```
+
+This runs after `_get_and_verify_max_len` has resolved the `None` / `-1` sentinels into a concrete integer, so the sentinels still work for the auto-derive path while 0 (and other non-positive resolved values) now produce a clean `ValueError` at config-construction time instead of silent propagation into the scheduler.
 
 ## Finding #4 — `--num-gpu-blocks-override 0` / negative → bare `AssertionError` in `BlockPool.__init__`
 
@@ -352,7 +368,7 @@ Lowest of the four live findings. The user sees an internal `AssertionError` poi
 
 Replace the bare assertion with an early validator on `CacheConfig`. Two natural shapes:
 
-1. **Field-level** — add a `field_validator` on `CacheConfig.num_gpu_blocks_override` matching the proposed shape for `max_model_len` (#43532) and for `block_size`/`hash_block_size` (#43514's pattern):
+1. **Field-level** — add a `field_validator` on `CacheConfig.num_gpu_blocks_override` matching the proposed shape for `max_model_len` (#43532) and for `block_size`/`hash_block_size` (#43794's pattern):
 
    ```python
    @field_validator("num_gpu_blocks_override", mode="after")
@@ -368,7 +384,7 @@ Replace the bare assertion with an early validator on `CacheConfig`. Two natural
 
 2. **Constructor-level** — replace the bare `assert` in `BlockPool.__init__` with a `raise ValueError(...)` carrying a descriptive message. Faster to land but only improves the diagnostic; doesn't prevent the engine from getting this far.
 
-(1) is preferred because it short-circuits the bad config at construction time, mirroring the pattern in #43514 / proposed for #43521 and #43532.
+(1) is preferred because it short-circuits the bad config at construction time, mirroring the pattern in #43794 / proposed for #43521 and #43532.
 
 ## Out of scope (this audit)
 

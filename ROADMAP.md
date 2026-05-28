@@ -14,7 +14,7 @@ Pinned upstream: `vllm-project/vllm @ 4438b6e7d`. Verifier: ESBMC 8.3.0+ (post-#
 | `round_up` | `vllm/utils/math_utils.py:20` | ✅ Phase 1 + 2 SUCCESSFUL (5 VCCs) |
 | `round_down` | `vllm/utils/math_utils.py:25` | ✅ Phase 1 + 2 SUCCESSFUL (5 VCCs) |
 | `get_num_blocks` | `vllm/v1/core/kv_cache_utils.py:935` | ✅ Phase 1 + 2 SUCCESSFUL (8 VCCs); latent precondition documented |
-| `--block-size 0` CLI path | `vllm/engine/arg_utils.py:1117` → `vllm/v1/kv_cache_interface.py:218` | ✅ Phase 1 FAILED (live bug witness, vllm-project/vllm#43496, candidate fix #43514) |
+| `--block-size 0` CLI path | `vllm/engine/arg_utils.py:1117` → `vllm/v1/kv_cache_interface.py:218` | ✅ Phase 1 FAILED (live bug witness, vllm-project/vllm#43496, **fixed upstream by [#43794](https://github.com/vllm-project/vllm/pull/43794), merged 2026-05-27**) |
 | `next_power_of_2` | `vllm/utils/math_utils.py:15` | ✅ Phase 1 + 2 SUCCESSFUL (5 VCCs) via loop reimplementation; ESBMC `bit_length` OM gap filed as [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756) |
 | `largest_power_of_2_divisor` | `vllm/utils/math_utils.py:30` | ✅ Phase 1 + 2 SUCCESSFUL (6 VCCs) via loop reimplementation; same blocker as above |
 
@@ -39,13 +39,13 @@ The `block_size_zero_cli_path` finding (issue #43496) demonstrated that **CLI pa
 |---|---|---|---|
 | ~~Audit of all `SkipValidation[int]` fields~~ | `vllm/config/*.py` | none | ✅ Shipped as [`AUDIT.md`](./AUDIT.md). Two fields enumerated; one already filed (#43496), the other (`hash_block_size`) confirmed as a second live, CLI-reachable bug of the same shape. |
 | ~~Broader audit of all CLI-settable `int` fields without `SkipValidation`~~ | `vllm/config/*.py` × `vllm/engine/arg_utils.py` | none | ✅ Shipped as [`AUDIT.md`](./AUDIT.md) *Broader audit*. Four new candidates enumerated (`num_gpu_blocks_override`, `max_model_len`, `max_logprobs`, `long_prefill_token_threshold`) plus several programmatic-only fields. Priority queue for harnessing in `AUDIT.md`. |
-| `--hash-block-size 0` | `vllm/config/cache.py:54` → `vllm/v1/core/kv_cache_utils.py:628` | none | ✅ **Shipped, reproduced, filed as [vllm-project/vllm#43521](https://github.com/vllm-project/vllm/issues/43521).** Harness `hash_block_size_zero_cli_path.py` produces the CWE-369 counterexample (`hash_block_size != 0`); the sandbox reproducer triggers the exact crash at line 628 of `resolve_kv_cache_block_sizes`. See [`AUDIT.md`](./AUDIT.md) Finding #2 and REPORT.md §5. |
-| `--hash-block-size -k` (k ≥ 1) propagation | `vllm/v1/core/kv_cache_utils.py:660-680` (`request_block_hasher` loop) | none | ✅ **Shipped and empirically reproduced.** Harness `hash_block_size_negative_propagation.py`; ESBMC's unwinding-assertion fires with witness `block_size = -1, num_tokens = 4`; sandbox reproducer triggers an infinite loop in the hasher closure. See [`AUDIT.md`](./AUDIT.md) Finding #2 *Adjacent failure mode*. Upstream issue to be filed separately from #43521 (different failure shape: silent startup, first-request hang). |
-| `--max-model-len 0` | `vllm/engine/arg_utils.py:802` → `vllm/v1/core/sched/scheduler.py:397` | none | ✅ **Shipped, reproduced, filed as [vllm-project/vllm#43532](https://github.com/vllm-project/vllm/issues/43532).** Harness `max_model_len_zero_cli_path.py`; ESBMC counterexample at `max_model_len=0, num_computed_tokens=0, num_new_tokens=1 → -1`; end-to-end reproducer via the public `ModelConfig` API (`cfg = ModelConfig(model=..., max_model_len=0)`; engine logs `Using max model len 0`). See [`AUDIT.md`](./AUDIT.md) Finding #3. |
+| `--hash-block-size 0` | `vllm/config/cache.py:54` → `vllm/v1/core/kv_cache_utils.py:628` | none | ✅ **Shipped, reproduced, filed as [vllm-project/vllm#43521](https://github.com/vllm-project/vllm/issues/43521); fixed upstream by [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794) (merged 2026-05-27).** Harness `hash_block_size_zero_cli_path.py` produces the CWE-369 counterexample (`hash_block_size != 0`); the sandbox reproducer triggers the exact crash at line 628 of `resolve_kv_cache_block_sizes`. See [`AUDIT.md`](./AUDIT.md) Finding #2 and REPORT.md §5. |
+| `--hash-block-size -k` (k ≥ 1) propagation | `vllm/v1/core/kv_cache_utils.py:660-680` (`request_block_hasher` loop) | none | ✅ **Shipped, empirically reproduced, incidentally fixed upstream.** Harness `hash_block_size_negative_propagation.py`; ESBMC's unwinding-assertion fires with witness `block_size = -1, num_tokens = 4`; sandbox reproducer triggers an infinite loop in the hasher closure. The `gt=0` constraint shipped in [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794) rejects negative values at config-construction time, so a separate upstream issue is no longer needed. See [`AUDIT.md`](./AUDIT.md) Finding #2 *Adjacent failure mode*. |
+| `--max-model-len 0` | `vllm/engine/arg_utils.py:802` → `vllm/v1/core/sched/scheduler.py:397` | none | ✅ **Shipped, reproduced, filed as [vllm-project/vllm#43532](https://github.com/vllm-project/vllm/issues/43532); fixed upstream by [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794) (merged 2026-05-27).** Harness `max_model_len_zero_cli_path.py`; ESBMC counterexample at `max_model_len=0, num_computed_tokens=0, num_new_tokens=1 → -1`; end-to-end reproducer via the public `ModelConfig` API (`cfg = ModelConfig(model=..., max_model_len=0)`; engine logs `Using max model len 0`). The landed fix tightens `validate_model_config_after` to reject `max_model_len < 1` after sentinel resolution. See [`AUDIT.md`](./AUDIT.md) Finding #3. |
 | `--num-gpu-blocks-override 0` / negative | `vllm/v1/core/kv_cache_utils.py:898` → `vllm/v1/core/block_pool.py:157` | none | ✅ **Shipped, reproduced.** Harness `num_gpu_blocks_override_zero_cli_path.py`; ESBMC counterexample at `user_override=0, profiled=1`; empirical chain confirms `CacheConfig` accepts 0, `may_override_num_blocks` returns 0, `BlockPool.__init__` raises bare `AssertionError`. See [`AUDIT.md`](./AUDIT.md) Finding #4. Upstream issue draft pending. |
 | `--max-logprobs <negative>` | `vllm/engine/arg_utils.py` → logprob array slicing | none | No validator; negative may slice unexpectedly. Smaller blast radius. |
 | `--long-prefill-token-threshold <negative>` | `vllm/engine/arg_utils.py` → `vllm/v1/core/sched/scheduler.py:393` | none | Default `0` is special-cased; the `0 < x < num_new_tokens` guard skips negatives, possibly intentionally. Worth a harness to confirm. |
-| `--block-size N` for prime / non-power-of-2 `N` | same as #43496 chain | none | The accepted bug fix (#43514) only enforces positivity, not the backend's `bs % 16 == 0`-style preference. Worth checking the downstream crash mode for accepted-but-suboptimal values. |
+| `--block-size N` for prime / non-power-of-2 `N` | same as #43496 chain | none | The landed bug fix ([#43794](https://github.com/vllm-project/vllm/pull/43794)) only enforces positivity (`gt=0`), not the backend's `bs % 16 == 0`-style preference. Worth checking the downstream crash mode for accepted-but-suboptimal values. |
 
 ## Tier 3 — KV cache & block manager (new data-structure stubs)
 
@@ -81,7 +81,7 @@ These targets need the first non-trivial stubs in the PoC: a `KVCacheBlock` data
 
 | Item | Status |
 |---|---|
-| Track [vllm-project/vllm#43514](https://github.com/vllm-project/vllm/pull/43514) (candidate fix for issue #43496) to merge | Open; non-blocking. Doc update will reference the merge commit once landed. |
+| ~~Track [vllm-project/vllm#43514](https://github.com/vllm-project/vllm/pull/43514) (candidate fix for issue #43496) to merge~~ | ✅ Superseded. The umbrella fix [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794) (merged 2026-05-27, commit [`2c2c9666`](https://github.com/vllm-project/vllm/commit/2c2c966669032e863f94919e9225aa12378c9364)) closes #43496, #43521, and #43532 in a single PR. |
 | ~~File ESBMC issue: `int.bit_length()` operational model unbounded unwinding on symbolic input~~ | Filed as [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756) with the minimal reproducer that motivated the loop-reimplementation pattern. |
 | File ESBMC issue: slicer drops the CWE-369 VCC when the dividend precondition tightens from `>= 0` to `>= 1` (observed building `block_size_zero_cli_path`) | Lower priority; documented in `RETROSPECTIVE.md` §Stub-correctness as item to file. |
 
@@ -89,7 +89,7 @@ These targets need the first non-trivial stubs in the PoC: a `KVCacheBlock` data
 
 | Option | Notes |
 |---|---|
-| Open one PR per filed bug, mirroring the #43514 pattern | Sustainable cadence; lets maintainers triage one CWE/UX issue at a time. |
+| Open one PR per filed bug (or accept an umbrella fix, as upstream did with [#43794](https://github.com/vllm-project/vllm/pull/43794) closing three at once) | Sustainable cadence; lets maintainers triage one CWE/UX issue at a time, or batch when the fix shape is uniform. |
 | Bundle a "config-validation audit" PR | After Tier 2 lands, propose adding `gt=0` to every `SkipValidation[int]` field that the audit identifies as unguarded. Single review surface. |
 | Submit a writeup / blog post on the PoC methodology | Post-Tier 3, when the PoC has a varied set of targets and at least 2 live bug reports. Out of scope for this repo. |
 
@@ -111,7 +111,7 @@ Cumulative target count and approximate `make verify` wall-clock at each milesto
 
 | Milestone | Cumulative targets | Wall-clock | Live findings to date |
 |---|---|---|---|
-| End of Tier 1 + both Tier 2 audits + five Tier 2 harnesses (current) | 17 entries | ~83 s | **5** (filed: #43496 + #43521 + #43532; queued: `--hash-block-size -k` propagation as comment for #43521; new: `--num-gpu-blocks-override 0` bare `AssertionError`, upstream issue draft pending) |
+| End of Tier 1 + both Tier 2 audits + five Tier 2 harnesses (current) | 17 entries | ~83 s | **5** (filed and **fixed upstream by [#43794](https://github.com/vllm-project/vllm/pull/43794)**: #43496 + #43521 + #43532, plus the unfiled `--hash-block-size -k` propagation incidentally closed by the same PR's `gt=0`; remaining: `--num-gpu-blocks-override 0` bare `AssertionError`, upstream issue draft pending) |
 | End of Tier 2 audit + 2 CLI-path harnesses | +4 entries → 17 | ~90 s | 1–3 likely |
 | End of Tier 3 (all rows) | +8 entries → 25 | ~3–4 min | open |
 | End of Tier 4 | +6 entries → 31 | ~5–8 min (CI-relevant) | open |
