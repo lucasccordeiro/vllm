@@ -7,8 +7,27 @@ integer / index arithmetic, modelled on the
 
 ## Status
 
-Four function targets plus one CLI-path target. End-to-end
-`make verify` (nine entries × two phases) completes in ~33 s.
+**30 verification targets** across Tiers 1–4 — pure-int helpers
+(`cdiv`, `round_up/down`, `next_power_of_2`, `largest_power_of_2_divisor`),
+CLI/config-validation paths, KV-cache data structures
+(`FreeKVCacheBlockQueue.popleft_n/append_n`, `BlockPool.get_new_blocks`,
+`KVCacheManager.allocate_slots`), and the first scheduler invariant
+(`_has_repeating_pattern` negative-index safety). End-to-end
+`make verify` (30 entries × two phases) completes in ~4 min with 0
+failures.
+
+**Seven live, CLI-reachable findings** to date (full enumeration in
+[`AUDIT.md`](./AUDIT.md)): three fixed upstream by PR #43794
+(`--block-size 0`, `--hash-block-size 0`, `--max-model-len 0`), a
+fourth (`--hash-block-size -k`) incidentally closed by the same
+`gt=0` constraint, one filed and open
+([#43842](https://github.com/vllm-project/vllm/issues/43842),
+`--num-gpu-blocks-override 0`), and two unfiled silent-acceptance
+defects (`--max-logprobs`/`--long-prefill-token-threshold` negatives).
+Three ESBMC frontend issues were filed along the way
+([#4926](https://github.com/esbmc/esbmc/issues/4926),
+[#4909](https://github.com/esbmc/esbmc/issues/4909),
+[#4756](https://github.com/esbmc/esbmc/issues/4756)).
 
 **First live, CLI-reachable upstream finding — filed as
 [vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496),
@@ -72,6 +91,35 @@ harness/
                             # CLI path: --hash-block-size 0         (FAILED, LIVE BUG)
   hash_block_size_negative_propagation.py
                             # CLI path: --hash-block-size -k        (FAILED, LIVE BUG)
+  max_model_len_zero_cli_path.py
+                            # CLI path: --max-model-len 0           (FAILED, LIVE BUG)
+  num_gpu_blocks_override_zero_cli_path.py
+                            # CLI path: --num-gpu-blocks-override 0 (FAILED, LIVE BUG #43842)
+  max_logprobs_negative_cli_path.py
+                            # CLI path: --max-logprobs <neg>        (FAILED, silent-acceptance)
+  long_prefill_token_threshold_negative_cli_path.py
+                            # CLI path: --long-prefill-token-threshold <neg> (FAILED, silent-acceptance)
+  block_size_non_power_of_2_supports.py
+                            # Tier-2 contract closure (non-power-of-2 N) (SUCCESSFUL, no bug)
+  free_kv_cache_block_queue_popleft_n.py
+                            # vllm/v1/core/kv_cache_utils.py:253    (Tier-3, K=4, SUCCESSFUL)
+  free_kv_cache_block_queue_popleft_n_buggy.py
+                            #   reconnect step dropped               (FAILED)
+  free_kv_cache_block_queue_append_n.py
+                            # vllm/v1/core/kv_cache_utils.py:329    (Tier-3, K=4, SUCCESSFUL)
+  free_kv_cache_block_queue_append_n_buggy.py
+                            #   tail rewire dropped                 (FAILED)
+  block_pool_get_new_blocks.py
+                            # vllm/v1/core/block_pool.py            (Tier-3, ref-counting, SUCCESSFUL)
+  block_pool_get_new_blocks_buggy.py
+                            #   block returned twice                (FAILED)
+  kv_cache_manager_allocate_slots.py
+                            # vllm/v1/core/kv_cache_manager.py      (Tier-3, token accounting, SUCCESSFUL)
+  kv_cache_manager_allocate_slots_buggy.py
+                            #   min() saturation dropped            (FAILED)
+  has_repeating_pattern.py  # vllm/v1/core/sched/utils.py:10        (Tier-4, neg-index safety, K=8, SUCCESSFUL)
+  has_repeating_pattern_buggy.py
+                            #   caller precondition dropped         (FAILED)
   next_power_of_2.py        # vllm/utils/math_utils.py:15           (non-buggy, loop model)
   next_power_of_2_buggy.py  #   off-by-one variant                  (FAILED)
   largest_power_of_2_divisor.py

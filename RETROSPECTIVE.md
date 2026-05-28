@@ -2,10 +2,11 @@
 
 ## TL;DR
 
-- **Four vLLM function targets + one CLI-path target** verified end-to-end with ESBMC's Python frontend, modelled on the [AWS-Neuron NKI PoC](https://github.com/lucasccordeiro/AWS-Neuron). `make verify` (nine entries × two phases) finishes in ~50 s on aarch64 macOS with each non-buggy entry generating between 3 and 8 verification conditions.
-- **Five live, CLI-reachable upstream bugs found and reported**, three of which are now **fixed upstream** by [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794) (merged 2026-05-27, commit [`2c2c9666`](https://github.com/vllm-project/vllm/commit/2c2c966669032e863f94919e9225aa12378c9364)): #43496 (`--block-size 0`), #43521 (`--hash-block-size 0`), #43532 (`--max-model-len 0`). The same `gt=0` constraint that closes #43521 also incidentally closes the unfiled adjacent `--hash-block-size -k` propagation finding. The fifth finding (`--num-gpu-blocks-override 0` → bare `AssertionError` in `BlockPool.__init__`) remains live, filed upstream as [vllm-project/vllm#43842](https://github.com/vllm-project/vllm/issues/43842).
+- **30 verification targets across Tiers 1–4** verified end-to-end with ESBMC's Python frontend, modelled on the [AWS-Neuron NKI PoC](https://github.com/lucasccordeiro/AWS-Neuron). `make verify` (30 entries × two phases) finishes in ~4 min on aarch64 macOS with 0 failures; per-entry VCC counts span 1 (CLI-path witnesses) to 6816 (`has_repeating_pattern` Phase 2). Tiers: 1 (pure-int helpers), 2 (CLI/config-validation hunts), 3 (KV-cache data structures — free-list queue, block pool, allocate_slots), 4 (scheduler invariants — `_has_repeating_pattern`).
+- **Seven live, CLI-reachable findings** found and reported. Three are **fixed upstream** by [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794) (merged 2026-05-27, commit [`2c2c9666`](https://github.com/vllm-project/vllm/commit/2c2c966669032e863f94919e9225aa12378c9364)): #43496 (`--block-size 0`), #43521 (`--hash-block-size 0`), #43532 (`--max-model-len 0`). The same `gt=0` constraint incidentally closes the unfiled adjacent `--hash-block-size -k` propagation finding. One is filed and **open** (`--num-gpu-blocks-override 0` → bare `AssertionError` in `BlockPool.__init__`, [vllm-project/vllm#43842](https://github.com/vllm-project/vllm/issues/43842)). Two are unfiled **silent-acceptance** defects (`--max-logprobs <negative>`, `--long-prefill-token-threshold <negative>` — AUDIT.md Findings #5/#6). A seventh entry (`--block-size N` non-power-of-2) is a contract-verification **closure**, not a live bug (AUDIT.md Finding #7).
 - **One latent-precondition finding** (not a live bug, defensive only): `vllm.v1.core.kv_cache_utils.get_num_blocks` has no in-function guard on `page_size > 0` or `num_layers > 0`. Reachability analysis (§Real upstream bugs caught) shows no current call site can trigger it without `head_size = 0` in a malformed HuggingFace config.
 - **Four ESBMC-Python frontend issues filed and fixed upstream** in the same session, all merged within hours: [#4744](https://github.com/esbmc/esbmc/issues/4744) (selective-import constants), [#4745](https://github.com/esbmc/esbmc/issues/4745) (PEP 604 class attrs), [#4746](https://github.com/esbmc/esbmc/issues/4746) (`Optional[T]` + `is not None`), [#4747](https://github.com/esbmc/esbmc/issues/4747) (class `__init__` default referencing module-level constant). Surfaced while modelling `VllmConfig.cache_config.num_gpu_blocks_override`.
+- **Three further ESBMC frontend issues filed** while building the Tier-3/Tier-4 targets: [#4756](https://github.com/esbmc/esbmc/issues/4756) (`int.bit_length()` unbounded unwinding on symbolic input — workaround: loop reimplementation), [#4909](https://github.com/esbmc/esbmc/issues/4909) (module-level named-constant + list-init crashes GOTO generation at `nlohmann::json::operator[]` — workaround: hard-code sentinel literals), [#4926](https://github.com/esbmc/esbmc/issues/4926) (the unary-minus list subscript `a[-i]` crashes the frontend — workaround: rewrite to `a[len - i]`). The last directly shaped the Tier-4 `has_repeating_pattern` harness.
 - **One methodology incident** (Finding 1, below): every prior non-buggy `SUCCESSFUL` verdict was vacuous because `harness/stubs.py` defined Python placeholders for `nondet_int()` and `__ESBMC_assume()` that the ESBMC frontend used in preference to its own intrinsics. Caught by a `--no-slice` VCC count probe. Fix removed the placeholders; all targets re-verified with real VCCs.
 
 ## What the PoC covers
@@ -35,7 +36,15 @@ A buggy entry whose Phase 1 already fails skips Phase 2 (matches AWS-Neuron's `t
 | `vllm/v1/core/sched/scheduler.py:397` (`--max-model-len 0` silent negative-num_new_tokens propagation) | scheduler arithmetic | fourth **live, CLI-reachable** finding (broader-audit follow-on, AUDIT.md Finding #3); filed as [vllm-project/vllm#43532](https://github.com/vllm-project/vllm/issues/43532); silent failure mode (no crash, request scheduled with negative `num_new_tokens` and 0 blocks allocated); ESBMC counterexample at `max_model_len=0, num_computed_tokens=0, num_new_tokens=1 → -1`; empirical chain confirms `_get_and_verify_max_len(0)=0`, scheduler computes `-1`, `cdiv(-1, 16)=0` silently |
 | `vllm/v1/core/block_pool.py:157` (`--num-gpu-blocks-override 0` bare AssertionError) | block-pool constructor | fifth **live, CLI-reachable** finding (broader-audit follow-on, AUDIT.md Finding #4); filed as [vllm-project/vllm#43842](https://github.com/vllm-project/vllm/issues/43842); loud but bare AssertionError without a message; ESBMC counterexample at `user_override=0, profiled=1`; empirical chain confirms `CacheConfig` accepts 0, `may_override_num_blocks` returns 0, `BlockPool.__init__` asserts |
 | `vllm/utils/math_utils.py:15` (`next_power_of_2`) | math helpers | non-buggy + buggy pair via loop reimplementation (5 VCCs each); ESBMC `bit_length` OM gap filed as [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756) |
-| `vllm/utils/math_utils.py:30` (`largest_power_of_2_divisor`) | math helpers | non-buggy + buggy pair via loop reimplementation (6 VCCs each); same blocker |
+| `vllm/utils/math_utils.py:30` (`largest_power_of_2_divisor`) | math helpers | non-buggy + buggy pair via loop reimplementation (39 VCCs each); same blocker |
+| `vllm/engine/arg_utils.py:525` → `vllm/sampling_params.py:713` (`--max-logprobs <negative>`) | sampling-params validation | sixth finding (AUDIT.md Finding #5); **silent-acceptance** defect — only the `-1` sentinel is rewritten, other negatives survive; not filed upstream (cosmetic blast radius) |
+| `vllm/engine/arg_utils.py:1386` → `vllm/v1/core/sched/scheduler.py:395` (`--long-prefill-token-threshold <negative>`) | scheduler arithmetic | seventh finding (AUDIT.md Finding #6); **silent-acceptance** defect — the `0 < threshold` guard no-ops on negatives, user-set cap has zero effect; not filed upstream |
+| `vllm/v1/attention/backend.py:175` (`--block-size N` non-power-of-2) | backend selection | contract-verification **closure**, not a live bug (AUDIT.md Finding #7); post-#43794 chain rejects cleanly; SUCCESSFUL (6 VCCs) |
+| `vllm/v1/core/kv_cache_utils.py:253` (`FreeKVCacheBlockQueue.popleft_n`) | KV-cache free list | **Tier-3** doubly-linked-list target at K=4; SUCCESSFUL (2321 VCCs); buggy drops the `prev[curr]=HEAD` reconnect → FAILED |
+| `vllm/v1/core/kv_cache_utils.py:329` (`FreeKVCacheBlockQueue.append_n`) | KV-cache free list | **Tier-3** inverse of popleft_n at K=4; SUCCESSFUL (1602 VCCs); buggy drops the tail rewire → FAILED |
+| `vllm/v1/core/block_pool.py` (`BlockPool.get_new_blocks`) | KV-cache block pool | **Tier-3** ref-counting layer at K=4; SUCCESSFUL (3168 VCCs); proves `ref_cnt 0→1`, no-double-return, raise-on-insufficient guard; buggy returns a block twice → FAILED at the production `ref_cnt==0` assert |
+| `vllm/v1/core/kv_cache_manager.py` (`KVCacheManager.allocate_slots`) | KV-cache coordinator | **Tier-3** token-accounting + admission guard; SUCCESSFUL (7 VCCs); `min(…, max_model_len)` saturations + `num_blocks_to_allocate > get_num_free_blocks()`; buggy drops a `min()` saturation → FAILED |
+| `vllm/v1/core/sched/utils.py:10` (`_has_repeating_pattern`) | scheduler utils | **Tier-4** negative-index safety at K=8; SUCCESSFUL (3902 VCCs); proves every `token_ids[-(pattern_len*m+n)]` access is in bounds under the caller precondition; buggy drops the precondition → FAILED (out-of-bounds magnitude) |
 
 Pinned upstream commit: `vllm-project/vllm @ 4438b6e7d` (HEAD at session start).
 
@@ -48,10 +57,16 @@ The vLLM stub surface is intentionally far thinner than NKI's. Most targets to d
 - **Bounds**: `INT_BOUND = 1 << 30` (wide window for linear postconditions and CWE-369 catches), `SMALL_BOUND = 1 << 10` (narrow window for non-linear postconditions where Bitwuzla doesn't terminate at INT_BOUND). Used in `harness/cdiv.py`, `round_up.py`, `round_down.py`.
 - **Identity passthrough**: `may_override_num_blocks(vllm_config, num_blocks)` — models the no-override path of `vllm/v1/core/kv_cache_utils.py:898`. `vllm_config` is opaque (any object); the integer-arithmetic surface to verify lives in the caller `get_num_blocks`, not in the override branch.
 
-Not modelled (because no current target reads them):
+Now modelled (Tier-3/Tier-4):
+
+- `FreeKVCacheBlockQueue`, `KVCacheBlock`, `BlockPool` — modelled as **parallel int arrays with integer sentinels** (NIL=-1, HEAD=K, TAIL=K+1) rather than a class graph, to sidestep ESBMC-Python's `Optional`/None and nested-attribute gaps. Used by `popleft_n`, `append_n`, `get_new_blocks`. `BlockPool` adds a per-slot `ref_cnt` array.
+- `KVCacheManager.allocate_slots` collaborators — the `coordinator` (`get_num_blocks_to_allocate` etc.) is modelled as a nondet non-negative count; only the token-accounting arithmetic the function itself computes is verified.
+- `_has_repeating_pattern` token list — a bounded list at concrete K=8 (negative indices rewritten to `token_ids[K-i]` per esbmc/esbmc#4926).
+
+Still not modelled (because no current target reads them):
 
 - `VllmConfig`, `CacheConfig`, `ParallelConfig`, `ModelConfig` — passed opaquely or bypassed entirely.
-- `KVCacheBlock`, `FreeKVCacheBlockQueue`, `BlockPool`, `Request`, `SchedulerConfig` — required for future targets (`popleft_n`, `get_new_blocks`, `schedule()`).
+- `Request`, `SchedulerConfig` as full classes — required for the remaining Tier-4 targets (`check_stop`, `schedule()`).
 
 ## Upstream issues filed
 
@@ -66,6 +81,8 @@ Not modelled (because no current target reads them):
 | [vllm-project/vllm#43532](https://github.com/vllm-project/vllm/issues/43532) | **RESOLVED** ([vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794), merged 2026-05-27) | "`--max-model-len 0` silently accepted; engine starts cleanly, requests scheduled with negative num_new_tokens" | n/a — upstream code fix. Landed shape: tightened the `isinstance(self.max_model_len, int)` check in `validate_model_config_after` (`vllm/config/model.py`) to additionally require `self.max_model_len >= 1`, so 0 and negatives are rejected with a clean `ValueError`. Surfaced by the broader-int-fields audit (AUDIT.md Finding #3). |
 | [vllm-project/vllm#43842](https://github.com/vllm-project/vllm/issues/43842) | **OPEN** | "`--num-gpu-blocks-override 0` silently accepted; engine init fails with bare `AssertionError` in `BlockPool.__init__`" | n/a — upstream code fix, same field-level shape as the #43794 fixes (`num_gpu_blocks_override: int \| None = Field(default=None, gt=0)`). Surfaced by the broader-int-fields audit (AUDIT.md Finding #4). |
 | [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756) | **OPEN** | "`int.bit_length()` OM unwinds indefinitely on symbolic input despite tight `__ESBMC_assume` bound" | Loop-reimplementation pattern is the current workaround for `next_power_of_2` and `largest_power_of_2_divisor`. Once fixed, the loop models can be retired in favour of the verbatim upstream forms. |
+| [esbmc/esbmc#4909](https://github.com/esbmc/esbmc/issues/4909) | **OPEN** | "Module-level named-constant + list-init crashes GOTO generation (`nlohmann::json::operator[]` assert)" | Tier-3 free-list harnesses hard-code the `HEAD`/`TAIL` sentinel values as literals instead of `HEAD = K` / `TAIL = K + 1`. |
+| [esbmc/esbmc#4926](https://github.com/esbmc/esbmc/issues/4926) | **OPEN** | "Unary-minus list subscript `a[-i]` (non-constant operand) crashes the frontend at `json.hpp:2147`" | Tier-4 `has_repeating_pattern` rewrites every `token_ids[-i]` to the positive equivalent `token_ids[K - i]`. |
 
 ## Source-rewriting history
 
@@ -94,7 +111,7 @@ End-to-end reachability analysis (REPORT.md §7) showed the failure is **not rea
 
 ### Not caught
 
-Anything below the Python API: CUDA kernels, C++ paged attention, Triton kernels. Concurrency and async-scheduler races. The data-structure-invariant targets (`FreeKVCacheBlockQueue.popleft_n`, `BlockPool.get_new_blocks`, `Scheduler.schedule()`) remain on the roadmap pending stub work that requires the ESBMC class-attribute fixes already merged.
+Anything below the Python API: CUDA kernels, C++ paged attention, Triton kernels. Concurrency and async-scheduler races. The Tier-3 data-structure-invariant targets (`FreeKVCacheBlockQueue.popleft_n`/`append_n`, `BlockPool.get_new_blocks`, `KVCacheManager.allocate_slots`) and the first Tier-4 scheduler invariant (`_has_repeating_pattern`) have since shipped; `Scheduler.schedule()`'s token-budget loop and `check_stop` remain on the roadmap.
 
 ## Stub-correctness and methodology incidents
 
@@ -140,8 +157,9 @@ The intent was that ESBMC would treat the names as intrinsics and override the b
 
 ## What's still out of scope
 
-- **`FreeKVCacheBlockQueue.popleft_n`** (`vllm/v1/core/kv_cache_utils.py:253`) and **`BlockPool.get_new_blocks`** (`vllm/v1/core/block_pool.py:333`). These are the first targets needing a real linked-list / ref-counted dataclass stub. Unblocked by the merged ESBMC fixes #4745/#4746/#4747; awaiting a session to model.
-- **`Scheduler.schedule()`** token-budget invariant (`vllm/v1/core/sched/scheduler.py:329`). High blast radius. Requires `Request`, `SchedulerConfig`, and the running-list machinery — deferred until the dataclass stubs from above shake out.
+- ~~**`FreeKVCacheBlockQueue.popleft_n`/`append_n`** and **`BlockPool.get_new_blocks`** and **`KVCacheManager.allocate_slots`**~~ — **shipped** (Tier-3), modelled with parallel-int-array stubs + a ref-count array; see the target-coverage table above.
+- ~~**`_has_repeating_pattern`**~~ — **shipped** (Tier-4 row 1), negative-index safety at K=8.
+- **`check_stop`** (`vllm/v1/core/sched/utils.py:94`) and **`Scheduler.schedule()`** token-budget invariant (`vllm/v1/core/sched/scheduler.py:329`). High blast radius. Require full `Request` / `SchedulerConfig` / running-list machinery — the remaining Tier-4 work.
 - **Symbolic-shape sweeps**. Concrete bounds only this session.
 - **Anything below the Python API.** CUDA, C++ paged attention, Triton kernels are out of scope.
 - **Concurrency / async-scheduler races.** Out of scope for the ESBMC Python frontend.
@@ -151,7 +169,7 @@ The intent was that ESBMC would treat the names as intrinsics and override the b
 
 1. **Intrinsic-recognition order should win over user definition** (or at least warn). The shadowing pitfall in Finding 1 was silent and produced a confident-looking `SUCCESSFUL`. A frontend warning when a user `def` overrides a known intrinsic name would have caught this immediately.
 2. **`Generated 0 VCC(s)` should be a non-zero exit code or a loud warning.** A successful verdict with no VCCs generated is almost always a methodology bug. Surfacing it as a hard signal would have saved a few merge cycles in this PoC.
-3. **Bitwise / shift operational models on bigint Python need attention.** `int.bit_length()` non-terminating on symbolic inputs blocked the planned target #3 (`next_power_of_2` / `largest_power_of_2_divisor`); the workaround was to verify a loop-based reimplementation of the same contract. To be filed as a separate issue after a minimal reproducer is isolated.
+3. **Bitwise / shift operational models on bigint Python need attention.** `int.bit_length()` non-terminating on symbolic inputs blocked the planned target #3 (`next_power_of_2` / `largest_power_of_2_divisor`); the workaround was to verify a loop-based reimplementation of the same contract. Filed as [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756). Two further frontend crashes surfaced in the Tier-3/Tier-4 work and were filed: [#4909](https://github.com/esbmc/esbmc/issues/4909) (named-constant + list-init GOTO-generation crash) and [#4926](https://github.com/esbmc/esbmc/issues/4926) (unary-minus list subscript `a[-i]` crash).
 4. **The fix turnaround on the four frontend issues filed in this session (~3 hours from file to merge for #4744–#4747) was outstanding** and is what made the PoC feasible end-to-end in a working day.
 
 ## Where to start reading

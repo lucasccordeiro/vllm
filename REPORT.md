@@ -1,11 +1,12 @@
 # vLLM ESBMC-Python Verification — Progress Report
 
-**Status**: pipeline operational; four function targets plus one
-CLI-path target verified end-to-end **under real symbolic
-execution** (see §10 for the methodology audit and fix). Full
-`make verify` (nine entries × two phases) completes in ~50 s on
-aarch64 macOS, with each non-buggy entry generating between 3 and
-8 verification conditions.
+**Status**: pipeline operational; **30 verification targets** across
+Tiers 1–4 verified end-to-end **under real symbolic execution** (see
+§10 for the methodology audit and fix). Full `make verify` (30 entries
+× two phases) completes in ~4 min on aarch64 macOS with 0 failures.
+Per-entry VCC counts span 1 (CLI-path live-bug witnesses) to 6816
+(`has_repeating_pattern` Phase 2); every non-buggy entry generates
+> 0 VCCs, enforced by the vacuity guard in `verify.py`.
 
 **First live, CLI-reachable upstream finding (§9). Filed as
 [vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496);
@@ -433,7 +434,7 @@ every non-buggy entry has > 0.
 | `long_prefill_token_threshold_negative_cli_path` | **FAILED (silent-config-acceptance witness; field admits any negative, scheduler.py:395 guard `0 < threshold < num_new_tokens` silently no-ops, user-set cap has zero effect)** | skipped         | 1    |
 | `block_size_non_power_of_2_supports` | SUCCESSFUL (contract-verification closure; post-#43794 backend-selection chain proven sound for non-power-of-2 N) | SUCCESSFUL (expected) | 6 |
 | `free_kv_cache_block_queue_popleft_n` (K = 4)    | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 2321 |
-| `free_kv_cache_block_queue_popleft_n_buggy`      | FAILED (expected; prev[curr] = HEAD reconnect dropped, postcondition P3 violated) | skipped | 1481 |
+| `free_kv_cache_block_queue_popleft_n_buggy`      | FAILED (expected; prev[curr] = HEAD reconnect dropped, postcondition P3 violated) | skipped | 1860 |
 | `free_kv_cache_block_queue_append_n` (K = 4)     | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 1602 |
 | `free_kv_cache_block_queue_append_n_buggy`       | FAILED (expected; fake_tail_prev = last rewire dropped, postcondition P5 violated) | skipped | 1065 |
 | `block_pool_get_new_blocks` (K = 4)              | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 3168 |
