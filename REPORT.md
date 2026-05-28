@@ -9,8 +9,12 @@ aarch64 macOS, with each non-buggy entry generating between 3 and
 
 **First live, CLI-reachable upstream finding (§9). Filed as
 [vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496);
-a candidate fix is in flight as
-[vllm-project/vllm#43514](https://github.com/vllm-project/vllm/pull/43514).**
+fixed upstream by
+[vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794)
+(merged 2026-05-27, commit
+[`2c2c9666`](https://github.com/vllm-project/vllm/commit/2c2c966669032e863f94919e9225aa12378c9364)),
+which also closes the sibling findings #43521 (`--hash-block-size 0`)
+and #43532 (`--max-model-len 0`).**
 `vllm serve <model> --block-size 0` is accepted by argparse, passes
 through `CacheConfig` (which uses `SkipValidation[int]`), passes
 through `Platform.update_block_size_for_backend` (which preserves
@@ -293,7 +297,7 @@ git history of `harness/block_size_zero_cli_path.py`.
 
 ## 9. Live, CLI-reachable bug: `--block-size 0` crashes engine init
 
-**Filed**: [vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496) (open, labelled `bug`).
+**Filed**: [vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496) (**closed**, fixed upstream by [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794), merged 2026-05-27).
 
 **Severity**: low security risk (requires the user to pass an
 invalid value), but a UX defect — the user sees an internal
@@ -382,7 +386,15 @@ The empirical traceback is included verbatim in upstream issue
 Reported upstream as
 [vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496)
 with the ESBMC counterexample and the empirical traceback as
-witnesses.
+witnesses. The landed fix
+([vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794),
+merged 2026-05-27) takes the field-level shape — replacing
+`SkipValidation[int]` on `CacheConfig.block_size` with
+`Field(default=None, gt=0)` plus a `mode="wrap"` validator that
+preserves the `None` sentinel — and lands the same `gt=0`
+constraint on `hash_block_size` (closing #43521) and a
+`max_model_len < 1` check in `validate_model_config_after` (closing
+#43532).
 
 ## 5. Verdict table
 
@@ -404,10 +416,10 @@ every non-buggy entry has > 0.
 | `round_down_buggy`         | FAILED (expected)             | skipped                      | 5    |
 | `get_num_blocks`           | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 8    |
 | `get_num_blocks_buggy`     | FAILED (expected)             | skipped                      | 4    |
-| `block_size_zero_cli_path` | **FAILED (live bug witness)** | skipped                      | 2    |
-| `hash_block_size_zero_cli_path` | **FAILED (live bug witness, [vllm-project/vllm#43521](https://github.com/vllm-project/vllm/issues/43521))** | skipped                  | 2    |
-| `hash_block_size_negative_propagation` | **FAILED (live bug witness, infinite loop in `request_block_hasher`)** | skipped         | 1    |
-| `max_model_len_zero_cli_path` | **FAILED (live bug witness, [vllm-project/vllm#43532](https://github.com/vllm-project/vllm/issues/43532))** | skipped         | 1    |
+| `block_size_zero_cli_path` | **FAILED (live bug witness, fixed upstream by [#43794](https://github.com/vllm-project/vllm/pull/43794))** | skipped                      | 2    |
+| `hash_block_size_zero_cli_path` | **FAILED (live bug witness, [vllm-project/vllm#43521](https://github.com/vllm-project/vllm/issues/43521), fixed upstream by [#43794](https://github.com/vllm-project/vllm/pull/43794))** | skipped                  | 2    |
+| `hash_block_size_negative_propagation` | **FAILED (live bug witness, infinite loop in `request_block_hasher`; incidentally closed by the `gt=0` constraint shipped in [#43794](https://github.com/vllm-project/vllm/pull/43794))** | skipped         | 1    |
+| `max_model_len_zero_cli_path` | **FAILED (live bug witness, [vllm-project/vllm#43532](https://github.com/vllm-project/vllm/issues/43532), fixed upstream by [#43794](https://github.com/vllm-project/vllm/pull/43794))** | skipped         | 1    |
 | `num_gpu_blocks_override_zero_cli_path` | **FAILED (live bug witness, bare `AssertionError` at `block_pool.py:157`)** | skipped         | 1    |
 | `next_power_of_2`          | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 5    |
 | `next_power_of_2_buggy`    | FAILED (expected)             | skipped                      | 5    |
