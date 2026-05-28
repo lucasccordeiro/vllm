@@ -76,6 +76,7 @@ engine. Structure mirrors the AWS-Neuron NKI PoC (see
 | 11 | `--num-gpu-blocks-override 0` CLI path | `vllm/engine/arg_utils.py:1126` → `vllm/v1/core/block_pool.py:157` (bare `AssertionError` on `num_gpu_blocks > 0`) |
 | 12 | `--max-logprobs <negative>` CLI path | `vllm/engine/arg_utils.py:525` → `vllm/sampling_params.py:713` (silent acceptance of every negative except the `-1` sentinel) |
 | 13 | `--long-prefill-token-threshold <negative>` CLI path | `vllm/engine/arg_utils.py:1386` → `vllm/v1/core/sched/scheduler.py:395` (`0 < threshold < num_new_tokens` guard silently no-ops on negatives) |
+| 14 | `--block-size N` non-power-of-2 (contract-verification closure, not a live bug) | `vllm/v1/attention/backend.py:175` (`supports_block_size`) — post-#43794 backend-selection chain rejects cleanly |
 
 Targets 1–3 are pure integer helpers with explicit preconditions;
 both the non-buggy and buggy entries are toy contracts that
@@ -425,6 +426,7 @@ every non-buggy entry has > 0.
 | `num_gpu_blocks_override_zero_cli_path` | **FAILED (live bug witness, [vllm-project/vllm#43842](https://github.com/vllm-project/vllm/issues/43842), bare `AssertionError` at `block_pool.py:157`)** | skipped         | 1    |
 | `max_logprobs_negative_cli_path` | **FAILED (silent-config-acceptance witness; field admits any negative besides the `-1` sentinel, surfacing either a confusing "max allowed: -5" error or a pure no-op depending on whether requests opt into logprobs)** | skipped         | 1    |
 | `long_prefill_token_threshold_negative_cli_path` | **FAILED (silent-config-acceptance witness; field admits any negative, scheduler.py:395 guard `0 < threshold < num_new_tokens` silently no-ops, user-set cap has zero effect)** | skipped         | 1    |
+| `block_size_non_power_of_2_supports` | SUCCESSFUL (contract-verification closure; post-#43794 backend-selection chain proven sound for non-power-of-2 N) | SUCCESSFUL (expected) | 6 |
 | `next_power_of_2`          | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 5    |
 | `next_power_of_2_buggy`    | FAILED (expected)             | skipped                      | 5    |
 | `largest_power_of_2_divisor`       | SUCCESSFUL (expected) | SUCCESSFUL (expected)        | 39   |
