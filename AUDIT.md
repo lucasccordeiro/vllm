@@ -200,7 +200,7 @@ These are set from model config / engine state, not directly by the user, but th
 
 ### Priority for harness work
 
-1. ~~**`--num-gpu-blocks-override 0` / negative**~~ — ✅ **Shipped and confirmed live** (this commit). Harness `harness/num_gpu_blocks_override_zero_cli_path.py`; ESBMC counterexample at `num_gpu_blocks_override = 0` with `profiled = 1` → `num_blocks = 0` → `assert num_blocks > 0` fires. Empirical chain (`CacheConfig(num_gpu_blocks_override=0).num_gpu_blocks_override == 0`; `may_override_num_blocks(_, 4096) → 0`; `BlockPool(num_gpu_blocks=0) → AssertionError`) confirms. Detailed write-up in Finding #4 below.
+1. ~~**`--num-gpu-blocks-override 0` / negative**~~ — ✅ **Shipped, confirmed live, filed as [vllm-project/vllm#43842](https://github.com/vllm-project/vllm/issues/43842)**. Harness `harness/num_gpu_blocks_override_zero_cli_path.py`; ESBMC counterexample at `num_gpu_blocks_override = 0` with `profiled = 1` → `num_blocks = 0` → `assert num_blocks > 0` fires. Empirical chain (`CacheConfig(num_gpu_blocks_override=0).num_gpu_blocks_override == 0`; `may_override_num_blocks(_, 4096) → 0`; `BlockPool(num_gpu_blocks=0) → AssertionError`) confirms. Detailed write-up in Finding #4 below.
 2. ~~**`--max-model-len 0`**~~ — ✅ **Shipped and confirmed live** (this commit). Harness `harness/max_model_len_zero_cli_path.py`; ESBMC counterexample at `max_model_len = 0, num_computed_tokens = 0, num_new_tokens = 1` produces `num_new_tokens = -1` at scheduler.py:397. Empirical chain (`_get_and_verify_max_len(0) = 0`; `min(1, -1) = -1`; `cdiv(-1, 16) = 0`) confirms the silent propagation. Detailed write-up in §3 below.
 3. `--max-logprobs` negative — easy to harness; smaller blast radius.
 4. `--long-prefill-token-threshold` negative — model is small but the guard is suggestive of a "treat 0 as off" intent that negatives slip past.
@@ -295,6 +295,8 @@ if not isinstance(self.max_model_len, int) or self.max_model_len < 1:
 This runs after `_get_and_verify_max_len` has resolved the `None` / `-1` sentinels into a concrete integer, so the sentinels still work for the auto-derive path while 0 (and other non-positive resolved values) now produce a clean `ValueError` at config-construction time instead of silent propagation into the scheduler.
 
 ## Finding #4 — `--num-gpu-blocks-override 0` / negative → bare `AssertionError` in `BlockPool.__init__`
+
+**Filed**: [vllm-project/vllm#43842](https://github.com/vllm-project/vllm/issues/43842) (open, labelled `bug`). Confirmed live against `origin/main` at commit `6cc8577` (2026-05-28); no commit between the #43794 merge and `6cc8577` touched `cache.py`, `kv_cache_utils.py`, or `block_pool.py`, so the empirical reproducer below still holds.
 
 ### Trace
 
