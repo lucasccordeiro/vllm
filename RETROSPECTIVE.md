@@ -107,7 +107,7 @@ Severity: low security risk (requires the user to pass an invalid value), but a 
 
 `vllm/v1/core/kv_cache_utils.py:935` divides by `page_size` and `num_layers` without checking either is positive. The signature `int` accepts zero. The unique caller at `vllm/v1/core/kv_cache_utils.py:1304` asserts `group_size > 0` (= `num_layers`) but does **not** assert `page_size > 0`. ESBMC's counterexample is `page_size == 0` (CWE-369).
 
-End-to-end reachability analysis (REPORT.md §7) showed the failure is **not reachable from a normal CLI invocation**. `page_size_bytes` factors as `2 * block_size * num_kv_heads * head_size * dtype_size`. For `page_size == 0` to reach `get_num_blocks`, one factor must be zero: `dtype_size` is enum-bounded; `num_kv_heads` is clamped to `max(1, ...)` at `config/model.py:1302`; `block_size = 0` triggers the live bug above (CWE-369 fires earlier in `max_memory_usage_bytes`); only `head_size = 0` (a corrupt HF model config field) reaches `get_num_blocks` first, and no real model has this. The finding is a defensive-invariant gap, not an exploitable bug — left as a roadmap note for upstream rather than a filed issue.
+End-to-end reachability analysis (REPORT.md §5) showed the failure is **not reachable from a normal CLI invocation**. `page_size_bytes` factors as `2 * block_size * num_kv_heads * head_size * dtype_size`. For `page_size == 0` to reach `get_num_blocks`, one factor must be zero: `dtype_size` is enum-bounded; `num_kv_heads` is clamped to `max(1, ...)` at `config/model.py:1302`; `block_size = 0` triggers the live bug above (CWE-369 fires earlier in `max_memory_usage_bytes`); only `head_size = 0` (a corrupt HF model config field) reaches `get_num_blocks` first, and no real model has this. The finding is a defensive-invariant gap, not an exploitable bug — left as a roadmap note for upstream rather than a filed issue.
 
 ### Not caught
 
@@ -139,7 +139,7 @@ The intent was that ESBMC would treat the names as intrinsics and override the b
 
 **General lesson.** **Never define a function in a stub library whose name might be claimed as a verifier intrinsic.** If the verifier's intrinsic-recognition order is "user definition wins", a sanity-friendly Python body silently turns symbolic execution into concrete execution and makes every `assert` reachable only on the trivial path. The VCC-count guard now in `verify.py` (see *Verification patterns worth carrying forward* §6) enforces this as a hard precondition for every `SUCCESSFUL` verdict — a future Finding-1-style regression would be caught at the next `make verify` run.
 
-**Impact on prior findings.** The live `--block-size 0` finding (#43496) and the latent `get_num_blocks` precondition both survived the audit — both relied on ESBMC's implicit CWE-369 check, not the (vacuous) user asserts. The empirical end-to-end reproduction in REPORT.md §9 independently confirms the live crash. Documentation and verdict tables were rewritten post-audit to reflect real VCC counts.
+**Impact on prior findings.** The live `--block-size 0` finding (#43496) and the latent `get_num_blocks` precondition both survived the audit — both relied on ESBMC's implicit CWE-369 check, not the (vacuous) user asserts. The empirical end-to-end reproduction in REPORT.md §7 independently confirms the live crash. Documentation and verdict tables were rewritten post-audit to reflect real VCC counts.
 
 ## Verification patterns worth carrying forward
 

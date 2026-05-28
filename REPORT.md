@@ -2,13 +2,13 @@
 
 **Status**: pipeline operational; **30 verification targets** across
 Tiers 1–4 verified end-to-end **under real symbolic execution** (see
-§10 for the methodology audit and fix). Full `make verify` (30 entries
+§11 for the methodology audit and fix). Full `make verify` (30 entries
 × two phases) completes in ~4 min on aarch64 macOS with 0 failures.
 Per-entry VCC counts span 1 (CLI-path live-bug witnesses) to 6816
 (`has_repeating_pattern` Phase 2); every non-buggy entry generates
 > 0 VCCs, enforced by the vacuity guard in `verify.py`.
 
-**Flagship live finding (§9):** `--block-size 0` is accepted by
+**Flagship live finding (§7):** `--block-size 0` is accepted by
 argparse and crashes engine init with `ZeroDivisionError` inside
 `cdiv(max_model_len, self.block_size)`. Filed as
 [vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496);
@@ -16,13 +16,13 @@ fixed upstream by
 [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794)
 (merged 2026-05-27), which also closes the siblings #43521
 (`--hash-block-size 0`) and #43532 (`--max-model-len 0`). Full trace,
-counterexample, and empirical reproduction in **§9**.
+counterexample, and empirical reproduction in **§7**.
 
-**Latent finding (§7, defensive — not a live bug):**
+**Latent finding (§5, defensive — not a live bug):**
 `get_num_blocks` divides by `page_size` / `num_layers` without
 guarding either; ESBMC flags `page_size == 0` (CWE-369), but
 reachability analysis shows it is unreachable from any normal
-invocation. Details in **§7**.
+invocation. Details in **§5**.
 
 **Pin**: vllm-project/vllm @ commit `4438b6e` (HEAD at session start).
 
@@ -73,7 +73,7 @@ both the non-buggy and buggy entries are toy contracts that
 demonstrate the pipeline.
 
 Target 4 is the first real-call-site target. Reachability analysis
-(§7) classifies its `*_buggy` counterexample as a latent /
+(§5) classifies its `*_buggy` counterexample as a latent /
 defensive-invariant gap, not a live bug.
 
 Targets 6–7 use loop reimplementations because ESBMC's Python
@@ -82,7 +82,7 @@ input ([esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756));
 the loop equivalence to upstream is by case analysis for n in
 [1, 2^30] (see each harness header).
 
-Targets 5, 8, and 9 are **live, CLI-reachable** findings (§9 and
+Targets 5, 8, and 9 are **live, CLI-reachable** findings (§7 and
 [`AUDIT.md`](./AUDIT.md) Finding #2). Unlike target 4's buggy
 variant, their preconditions faithfully model what the upstream
 argument-parsing and config-validation chain permits. The FAILED
@@ -188,7 +188,7 @@ and *Source-rewriting history*).
 The PoC's local ESBMC binary is rebuilt at or after the
 `#4754` merge (master commit `7d434cc303`, 2026-05-24).
 
-## 7. Latent precondition in `get_num_blocks` (defensive, not live)
+## 5. Latent precondition in `get_num_blocks` (defensive, not live)
 
 Upstream source (`vllm/v1/core/kv_cache_utils.py:935`):
 
@@ -258,7 +258,7 @@ same harness pattern will catch this if a future call site or a
 new `KVCacheSpec` subclass with a different `page_size_bytes`
 formula breaks the implicit invariant.
 
-## 8. Additional ESBMC-Python frontend gaps observed
+## 6. Additional ESBMC-Python frontend gaps observed
 
 Building the `get_num_blocks` harness surfaced three further
 Python-frontend limitations in ESBMC 8.3.0. All filed upstream
@@ -288,7 +288,7 @@ the divisor being permitted to be zero. Workaround in this PoC:
 keep the dividend precondition at `>= 0`. The reproducer is the
 git history of `harness/block_size_zero_cli_path.py`.
 
-## 9. Live, CLI-reachable bug: `--block-size 0` crashes engine init
+## 7. Live, CLI-reachable bug: `--block-size 0` crashes engine init
 
 **Filed**: [vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496) (**closed**, fixed upstream by [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794), merged 2026-05-27).
 
@@ -389,10 +389,10 @@ constraint on `hash_block_size` (closing #43521) and a
 `max_model_len < 1` check in `validate_model_config_after` (closing
 #43532).
 
-## 5. Verdict table
+## 8. Verdict table
 
 All verdicts below come from **real symbolic execution** — the
-methodology audit in §10 retired the previous vacuous-SUCCESSFUL
+methodology audit in §11 retired the previous vacuous-SUCCESSFUL
 results, and `verify.py` now enforces a hard guard
 (`FAIL (vacuous: 0 VCCs)`) so any future regression of this class
 is caught immediately. VCC counts in the rightmost column report
@@ -442,12 +442,12 @@ Equivalence to upstream is by case analysis for n in [1, 2^30]
 and documented in each harness header.
 
 The `block_size_zero_cli_path` FAILED verdict is the ESBMC
-counterexample for the live `--block-size 0` bug documented in §9.
+counterexample for the live `--block-size 0` bug documented in §7.
 Unlike `*_buggy` entries (deliberately-weakened harnesses), this
 target's preconditions faithfully model what the CLI accepts; the
 FAILED verdict witnesses a real, CLI-reachable defect.
 
-## 6. Roadmap — remaining targets
+## 9. Roadmap — remaining targets
 
 In order of increasing harness complexity:
 
@@ -467,7 +467,7 @@ In order of increasing harness complexity:
    real stub (linked-list `KVCacheBlock` dataclass at concrete
    K=4). Proof obligations: `num_free_blocks` monotone-decreasing;
    `len(ret) == n`; no block popped twice. Blocked on ESBMC-Python
-   class-attribute fixes (see §8).
+   class-attribute fixes (see §6).
 
 5. **`BlockPool.get_new_blocks`** —
    `vllm/v1/core/block_pool.py:333`. Builds on (4). Adds
@@ -478,7 +478,7 @@ In order of increasing harness complexity:
 deferred until the dataclass and free-list machinery from (4) and
 (5) has shaken out.
 
-## 7. How to reproduce
+## 10. How to reproduce
 
 ```
 make verify              # both phases on every target
@@ -499,7 +499,7 @@ no build/concatenation step is needed since
 landed (`from stubs import …` works for both constants and
 intrinsics).
 
-## 10. Methodology audit
+## 11. Methodology audit
 
 Moved to [`RETROSPECTIVE.md`](./RETROSPECTIVE.md) (*Stub-correctness
 and methodology incidents → Finding 1*). The audit covers the

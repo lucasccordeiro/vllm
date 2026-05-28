@@ -42,13 +42,13 @@ source and triggering the exact crash. The landed fix
 `SkipValidation[int]` with the one-line `Field(default=None, gt=0)`
 shape proposed in the issue, and the harness is kept as a regression
 witness — re-running it against post-#43794 source now exercises the
-validator instead of the crash site. See [`REPORT.md` §9](./REPORT.md).
+validator instead of the crash site. See [`REPORT.md` §7](./REPORT.md).
 
 **First latent-precondition finding (defensive, not a live bug).**
 `vllm.v1.core.kv_cache_utils.get_num_blocks` divides by `page_size`
 and `num_layers` without guarding either; reachability analysis
 shows the failure is not reachable from any normal CLI invocation.
-See [`REPORT.md` §7](./REPORT.md).
+See [`REPORT.md` §5](./REPORT.md).
 
 See [`REPORT.md`](./REPORT.md) for the full scope, soundness
 caveats, and target roadmap.
