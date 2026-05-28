@@ -16,7 +16,7 @@ Pinned upstream: `vllm-project/vllm @ 4438b6e7d`. Verifier: ESBMC 8.3.0+ (post-#
 | `get_num_blocks` | `vllm/v1/core/kv_cache_utils.py:935` | ✅ Phase 1 + 2 SUCCESSFUL (8 VCCs); latent precondition documented |
 | `--block-size 0` CLI path | `vllm/engine/arg_utils.py:1117` → `vllm/v1/kv_cache_interface.py:218` | ✅ Phase 1 FAILED (live bug witness, vllm-project/vllm#43496, **fixed upstream by [#43794](https://github.com/vllm-project/vllm/pull/43794), merged 2026-05-27**) |
 | `next_power_of_2` | `vllm/utils/math_utils.py:15` | ✅ Phase 1 + 2 SUCCESSFUL (5 VCCs) via loop reimplementation; ESBMC `bit_length` OM gap filed as [esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756) |
-| `largest_power_of_2_divisor` | `vllm/utils/math_utils.py:30` | ✅ Phase 1 + 2 SUCCESSFUL (6 VCCs) via loop reimplementation; same blocker as above |
+| `largest_power_of_2_divisor` | `vllm/utils/math_utils.py:30` | ✅ Phase 1 + 2 SUCCESSFUL (39 VCCs) via loop reimplementation; same blocker as above |
 
 Each target also ships a buggy counterpart that exercises the corresponding implicit CWE-369 VCC or postcondition violation. Full table with per-target VCCs in [`REPORT.md` §5](./REPORT.md).
 
@@ -63,7 +63,8 @@ These targets need the first non-trivial stubs in the PoC: a `KVCacheBlock` data
 
 | Target | Source | New stubs | Blockers / proof obligations |
 |---|---|---|---|
-| `_has_repeating_pattern` / `check_sequence_repetition` | `vllm/v1/core/sched/utils.py:10,28` | minimal `RepetitionDetectionParams` | Negative-index arithmetic on `token_ids[-(pattern_len * m + n)]`; precondition `pattern_len * min_count <= len(token_ids)`. Bounded list at concrete K = 16. |
+| `_has_repeating_pattern` | `vllm/v1/core/sched/utils.py:10` | bounded list at K | ✅ **Shipped, Phase 1 + Phase 2 SUCCESSFUL at K = 8** (`has_repeating_pattern.py`, 3902 / 6816 VCCs). Proves the negative-index safety: every `token_ids[-n]` and `token_ids[-(pattern_len*m+n)]` access stays in bounds under the caller precondition `pattern_len * min_count <= len(token_ids)` (utils.py:52) plus the `min_pattern_size >= 1` / `min_count >= 2` guards. Two ESBMC-Python facts shaped it: (i) the `a[-i]` unary-minus subscript crashes the frontend (filed as [esbmc/esbmc#4926](https://github.com/esbmc/esbmc/issues/4926)), so indices are rewritten to `token_ids[K - i]`; (ii) the precondition is non-linear, so per-variable bounds must be stated explicitly or the fixed-width model satisfies it vacuously by overflow. K = 8 (not 16) because the non-linear product across the full unrolled space did not converge at 16 within budget. Buggy counterpart drops the precondition → out-of-bounds magnitude, FAILS. |
+| `check_sequence_repetition` | `vllm/v1/core/sched/utils.py:28` | minimal `RepetitionDetectionParams` | The guard wrapper around `_has_repeating_pattern` (establishes the precondition above). Next Tier-4 step: verify the guard chain (`min_pattern_size <= 0 -> 1`, `max_pattern_size <= 0 or min_count < 2 -> return False`, per-`pattern_len` `* min_count > len -> return`). |
 | `check_stop` | `vllm/v1/core/sched/utils.py:94` | minimal `Request` + `SamplingParams` | `num_tokens >= max_model_len` and `num_output_tokens >= max_tokens` lifecycle invariants. |
 | `Scheduler.schedule()` token-budget loop | `vllm/v1/core/sched/scheduler.py:329` | `Request`, `SchedulerConfig`, running-list with concrete K running requests | **Flagship**. `token_budget >= 0` invariant across the loop body **and** the preemption-restore branch (`token_budget += num_scheduled_tokens.pop(...)`). `num_new_tokens >= 0`. `max_model_len - 1 - num_computed_tokens` underflow. Multi-week effort. |
 
@@ -103,7 +104,7 @@ These targets need the first non-trivial stubs in the PoC: a `KVCacheBlock` data
 6. **Tier 3, row 1** (`BlockPool.get_usage`): demoted to *optional contract-verification target* — inspection of the actual function shows it's already safe (constructor asserts `num_gpu_blocks > 0`, function early-returns 0 when `total_gpu_blocks == 0`). The earlier "div-by-zero candidate" framing was speculative.
 7. ~~**Tier 3, rows 2–3** (`popleft_n` / `append_n`)~~ — ✅ shipped. Parallel-array-with-integer-sentinel pattern documented in the two harness headers; unlocks rows 4–5.
 8. ~~**Tier 3, rows 4–5**~~ — ✅ both shipped. Row 4 (`BlockPool.get_new_blocks`, `block_pool_get_new_blocks.py`) added the first ref-counting layer atop the verified free-list pop. Row 5 (`KVCacheManager.allocate_slots`, `kv_cache_manager_allocate_slots.py`) verified the coordinator's token-accounting arithmetic + admission guard, modelling `get_num_blocks_to_allocate` as a nondet stub. Tier 3 row 1 (`BlockPool.get_usage`) remains an *optional* contract-verification target (already safe; see row table). With rows 2–5 done, Tier 3's live data-structure rows are complete.
-9. **Tier 4** in priority order: `_has_repeating_pattern` (cheapest), then `check_stop`, then the flagship `schedule()` token-budget loop. The last is multi-week.
+9. **Tier 4** in priority order: ~~`_has_repeating_pattern` (cheapest)~~ — ✅ shipped (negative-index safety at K = 8; `has_repeating_pattern.py`). Next: `check_sequence_repetition` (the guard wrapper), then `check_stop`, then the flagship `schedule()` token-budget loop. The last is multi-week.
 
 ## End-state estimates
 
@@ -113,7 +114,8 @@ Cumulative target count and approximate `make verify` wall-clock at each milesto
 |---|---|---|---|
 | End of Tier 1 + both Tier 2 audits + seven Tier 2 harnesses + 1 contract-verification closure + Tier 3 rows 2–5 (current) | 28 entries | ~3 min 45 s | **7 findings** (filed and **fixed upstream by [#43794](https://github.com/vllm-project/vllm/pull/43794)**: #43496 + #43521 + #43532, plus the unfiled `--hash-block-size -k` propagation incidentally closed by the same PR's `gt=0`; **filed and open**: [#43842](https://github.com/vllm-project/vllm/issues/43842) `--num-gpu-blocks-override 0` bare `AssertionError`; **not filed yet, bundled in a "config-validation tightening" follow-up**: AUDIT Finding #5 `--max-logprobs <negative>` silent acceptance, AUDIT Finding #6 `--long-prefill-token-threshold <negative>` silent acceptance). The `--block-size N` non-power-of-2 Tier-2 leftover is closed without a finding — post-#43794 backend-selection chain rejects cleanly; documented as AUDIT Finding #7. Tier 3 rows 2–5 shipped as contract-verification SUCCESSFUL targets (`popleft_n` / `append_n` / `get_new_blocks` at K = 4 + `allocate_slots` token accounting, each with a buggy counterpart). |
 | End of Tier 3 (all rows) | +0–2 entries → 28–30 (only the optional `get_usage` row 1 remains) | ~3–4 min | open |
-| End of Tier 4 | +6 entries → ~34–36 | ~5–8 min (CI-relevant) | open |
+| Tier 4 row 1 (`_has_repeating_pattern`) shipped | 30 entries | ~4 min 25 s | open |
+| End of Tier 4 | +4 entries → ~34 | ~5–8 min (CI-relevant) | open |
 
 ## Out of scope (explicit non-goals)
 
