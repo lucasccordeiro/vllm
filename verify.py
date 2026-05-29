@@ -327,6 +327,18 @@ TARGETS: list[Target] = [
         expected="FAILED",
         safety_expected=None,
     ),
+    Target(
+        name="scheduler_token_budget_waiting",
+        entry="scheduler_token_budget_waiting.py",
+        expected="SUCCESSFUL",
+        safety_expected="SUCCESSFUL",
+    ),
+    Target(
+        name="scheduler_token_budget_waiting_buggy",
+        entry="scheduler_token_budget_waiting_buggy.py",
+        expected="FAILED",
+        safety_expected=None,
+    ),
     # The next four targets use loop reimplementations of upstream's
     # bit-trick functions (see harness headers for the equivalence
     # argument). --unwind 32 covers the longest loop the
