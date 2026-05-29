@@ -299,6 +299,20 @@ TARGETS: list[Target] = [
         expected="FAILED",
         safety_expected=None,
     ),
+    Target(
+        name="scheduler_token_budget_loop",
+        entry="scheduler_token_budget_loop.py",
+        esbmc_args=("--unwind", "5"),
+        expected="SUCCESSFUL",
+        safety_expected="SUCCESSFUL",
+    ),
+    Target(
+        name="scheduler_token_budget_loop_buggy",
+        entry="scheduler_token_budget_loop_buggy.py",
+        esbmc_args=("--unwind", "5"),
+        expected="FAILED",
+        safety_expected=None,
+    ),
     # The next four targets use loop reimplementations of upstream's
     # bit-trick functions (see harness headers for the equivalence
     # argument). --unwind 32 covers the longest loop the
