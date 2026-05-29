@@ -27,8 +27,8 @@ from stubs import nondet_int, __ESBMC_assume
 
 K = 4
 NIL = -1
-HEAD = 4
-TAIL = 5
+HEAD = K
+TAIL = K + 1
 
 
 def main() -> None:
@@ -51,7 +51,7 @@ def main() -> None:
     num_free_blocks -= n
 
     curr = fake_head_next
-    ret = [-1, -1, -1, -1]
+    ret = [NIL, NIL, NIL, NIL]
     for i in range(K):
         if i < n:
             assert curr != TAIL

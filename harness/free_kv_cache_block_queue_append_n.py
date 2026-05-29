@@ -8,7 +8,7 @@
 # parallel-array representation; see
 # free_kv_cache_block_queue_popleft_n.py for the full design
 # rationale (PEP 604 / Optional / nested-attribute frontend gaps;
-# integer-sentinel mapping HEAD = 4, TAIL = 5, NIL = -1; and the
+# integer-sentinel mapping HEAD = K, TAIL = K + 1, NIL = -1; and the
 # `if i < n:` loop-style required to avoid the implicit secondary-
 # loop expansion on `if … continue`).
 #
@@ -39,21 +39,19 @@ from stubs import nondet_int, __ESBMC_assume
 
 K = 4
 NIL = -1
-HEAD = 4
-TAIL = 5
+HEAD = K
+TAIL = K + 1
 
 
 def main() -> None:
-    # Initial state: empty queue, all slots detached.
-    # NB: list literals are written with the integer value of NIL
-    # (-1) hard-coded rather than `[NIL, NIL, NIL, NIL]`. ESBMC-
-    # Python 8.3.0 crashes at GOTO generation (`nlohmann::json::
-    # operator[]` assert) on certain combinations of named-constant
-    # initialisers; bisection points at this exact shape. Issue
-    # filed; see the harness header for context.
+    # Initial state: empty queue, all slots detached. (Earlier ESBMC
+    # builds crashed at GOTO generation on `[NIL, NIL, NIL, NIL]`-style
+    # named-constant list initialisers — esbmc/esbmc#4909 — which forced
+    # the integer value -1 to be hard-coded here; that bug is fixed and
+    # the named sentinels are used again.)
     block_id = [0, 1, 2, 3]
-    prev = [-1, -1, -1, -1]
-    next_idx = [-1, -1, -1, -1]
+    prev = [NIL, NIL, NIL, NIL]
+    next_idx = [NIL, NIL, NIL, NIL]
     fake_head_next = TAIL
     fake_tail_prev = HEAD
     num_free_blocks = 0
@@ -82,7 +80,7 @@ def main() -> None:
     assert last != NIL
 
     # The interior-connection loop. In our model, when `last` is
-    # the fake head (slot index HEAD = 4, out of [0, K)), the
+    # the fake head (slot index HEAD = K, out of [0, K)), the
     # `last.next_free_block = block` assignment is the equivalent
     # of setting fake_head_next. For real-slot `last`, it is the
     # assignment to next_idx[last].

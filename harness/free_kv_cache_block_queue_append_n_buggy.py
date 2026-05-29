@@ -29,14 +29,14 @@ from stubs import nondet_int, __ESBMC_assume
 
 K = 4
 NIL = -1
-HEAD = 4
-TAIL = 5
+HEAD = K
+TAIL = K + 1
 
 
 def main() -> None:
     block_id = [0, 1, 2, 3]
-    prev = [-1, -1, -1, -1]
-    next_idx = [-1, -1, -1, -1]
+    prev = [NIL, NIL, NIL, NIL]
+    next_idx = [NIL, NIL, NIL, NIL]
     fake_head_next = TAIL
     fake_tail_prev = HEAD
     num_free_blocks = 0
