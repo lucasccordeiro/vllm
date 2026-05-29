@@ -25,11 +25,17 @@ Each target also ships a buggy counterpart that exercises the corresponding impl
 ~~All Tier-1 targets shipped~~ — see *Already covered* above. The
 loop-reimplementation pattern that unblocked them is documented
 in [`RETROSPECTIVE.md`](./RETROSPECTIVE.md) (*Verification patterns
-worth carrying forward*, pattern #1 onwards). The remaining OM gap
-on `int.bit_length()` over symbolic input is tracked at
-[esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756);
-once it lands the loop reimplementations can be retired in favour
-of the verbatim upstream forms.
+worth carrying forward*, pattern #1 onwards). The OM gap on
+`int.bit_length()` over symbolic input was filed as
+[esbmc/esbmc#4756](https://github.com/esbmc/esbmc/issues/4756) (now
+**closed** upstream, 2026-05-24). The loop reimplementations are
+**retained** nonetheless: in the available ESBMC build `bit_length` is
+still not functionally modelled — a false assert on a `bit_length`
+result verifies with 0 VCCs (concrete *and* symbolic) — so reverting to
+the verbatim `bit_length` forms would make those targets vacuous (the
+`verify.py` vacuity guard would flag them). Retiring the workaround
+needs an ESBMC build that functionally models `bit_length`, re-confirmed
+with a false-assert probe.
 
 ## Tier 2 — CLI / config validation hunts (live-bug-class targets)
 
@@ -53,7 +59,7 @@ These targets need the first non-trivial stubs in the PoC: a `KVCacheBlock` data
 
 | Target | Source | New stubs | Blockers / proof obligations |
 |---|---|---|---|
-| ~~`BlockPool.get_usage`~~ | `vllm/v1/core/block_pool.py:497` | minimal `BlockPool` | **Not a live-bug candidate.** Inspection of the actual function shows two guards: the constructor asserts `num_gpu_blocks > 0` (line 157), and the function itself early-returns 0 when `total_gpu_blocks == 0`. The "div-by-zero candidate" framing in earlier drafts of this roadmap was speculative; the function is already safe. Verifying the docstring contract (`0.0 ≤ result ≤ 1.0`) is still a valid contract-verification target but yields no bug. Demoted to *optional* under Tier 3. |
+| `BlockPool.get_usage` | `vllm/v1/core/block_pool.py:497` | minimal `BlockPool` | ✅ **Shipped (optional contract target), Phase 1 + Phase 2 SUCCESSFUL** (`block_pool_get_usage.py`, 3 / 8 VCCs). Not a live bug (already safe): proves the `if total_gpu_blocks == 0: return 0` early return guards the division — machine-checked via integer `//` (CWE-369), since ESBMC-Python does not model float true-division `/` (a false assert on `1.0 - free/total` verifies with 0 VCCs — concrete *and* symbolic). The docstring `0.0 ≤ usage ≤ 1.0` float contract is therefore the arithmetic corollary of the verified integer invariant `0 ≤ free ≤ total_gpu_blocks`, not machine-checked directly. Buggy drops the early return → `0 // 0` div-by-zero. |
 | `FreeKVCacheBlockQueue.popleft_n(n)` | `vllm/v1/core/kv_cache_utils.py:253` | doubly-linked `KVCacheBlock` at concrete K = 4 | ✅ **Shipped, Phase 1 + Phase 2 SUCCESSFUL at K = 4** (`free_kv_cache_block_queue_popleft_n.py`, 2321 VCCs, ~33 s/phase). Buggy counterpart (drops the `prev[curr] = HEAD` reconnect) FAILS as expected. Doubly-linked structure modelled via parallel int arrays + integer sentinels (NIL = -1, HEAD = K, TAIL = K + 1) to sidestep ESBMC-Python's `Optional`/None and nested-attribute gaps. Two ESBMC-Python frontend pitfalls hit while building: (i) module-level `HEAD = K` (named constant referencing another) triggered a `nlohmann::json::operator[]` crash at GOTO generation — filed as [esbmc/esbmc#4909](https://github.com/esbmc/esbmc/issues/4909), now fixed and the literal-sentinel workaround retired; (ii) `for i in range(K): if cond: continue` expands to an internal secondary loop with very high unwind ID (loop 149 in trial runs), worked around with the `if i < n:` positive-condition form. |
 | `FreeKVCacheBlockQueue.append_n` | `vllm/v1/core/kv_cache_utils.py:329` | same | ✅ **Shipped, Phase 1 + Phase 2 SUCCESSFUL at K = 4** (`free_kv_cache_block_queue_append_n.py`, 1602 VCCs, ~9 s/phase). Inverse-of-popleft_n shape; same parallel-array stub. Buggy counterpart (drops the `fake_tail_prev = last` rewire) FAILS as expected. |
 | `BlockPool.get_new_blocks(num_blocks)` | `vllm/v1/core/block_pool.py` | adds ref-counting on `KVCacheBlock` | ✅ **Shipped, Phase 1 + Phase 2 SUCCESSFUL at K = 4** (`block_pool_get_new_blocks.py`, 3168 / 3277 VCCs). First ref-counting layer: reuses the verified popleft_n free-list model and adds a per-slot `ref_cnt` array. Verifies all three proof obligations — `ref_cnt == 0` before / `== 1` after each returned block (the upstream production `assert block.ref_cnt == 0`), no block returned twice (pairwise-distinct returned ids), and the raise-on-insufficient guard fires exactly when `num_blocks > get_num_free_blocks()` leaving state untouched. Models the `enable_caching = False` branch; the caching branch's `_maybe_evict_cached_block` does not touch `ref_cnt`, so the contract is identical. Buggy counterpart (a non-advancing pop that returns slot 0 twice) FAILS at the production `ref_cnt == 0` assert. |
@@ -101,7 +107,7 @@ These targets need the first non-trivial stubs in the PoC: a `KVCacheBlock` data
 3. ~~**Tier 2 audit** of `SkipValidation[int]` fields~~ — shipped as [`AUDIT.md`](./AUDIT.md). Second live bug confirmed (`hash_block_size`).
 4. ~~**Tier 2 broader audit** of all CLI-settable `int` fields without `SkipValidation`~~ — shipped as [`AUDIT.md`](./AUDIT.md) *Broader audit*. Four new candidates queued; `--max-model-len 0` is the top live-bug candidate.
 5. ~~**Tier 2 harnesses** for the top candidates from the audit~~ — all four shipped: `--max-model-len 0` (#43532), `--num-gpu-blocks-override 0` (#43842), `--max-logprobs <negative>` (silent-acceptance, AUDIT Finding #5), `--long-prefill-token-threshold <negative>` (silent-acceptance, AUDIT Finding #6).
-6. **Tier 3, row 1** (`BlockPool.get_usage`): demoted to *optional contract-verification target* — inspection of the actual function shows it's already safe (constructor asserts `num_gpu_blocks > 0`, function early-returns 0 when `total_gpu_blocks == 0`). The earlier "div-by-zero candidate" framing was speculative.
+6. ~~**Tier 3, row 1** (`BlockPool.get_usage`)~~ — ✅ shipped as an optional contract target (`block_pool_get_usage.py`): proves the early-return guards the division (div-by-zero safety via integer `//`); the float `0.0 ≤ usage ≤ 1.0` contract is a documented corollary since ESBMC-Python doesn't model float `/`. No bug (already safe).
 7. ~~**Tier 3, rows 2–3** (`popleft_n` / `append_n`)~~ — ✅ shipped. Parallel-array-with-integer-sentinel pattern documented in the two harness headers; unlocks rows 4–5.
 8. ~~**Tier 3, rows 4–5**~~ — ✅ both shipped. Row 4 (`BlockPool.get_new_blocks`, `block_pool_get_new_blocks.py`) added the first ref-counting layer atop the verified free-list pop. Row 5 (`KVCacheManager.allocate_slots`, `kv_cache_manager_allocate_slots.py`) verified the coordinator's token-accounting arithmetic + admission guard, modelling `get_num_blocks_to_allocate` as a nondet stub. Tier 3 row 1 (`BlockPool.get_usage`) remains an *optional* contract-verification target (already safe; see row table). With rows 2–5 done, Tier 3's live data-structure rows are complete.
 9. **Tier 4** in priority order: ~~`_has_repeating_pattern`~~ — ✅ shipped (negative-index safety at K = 8). ~~`check_sequence_repetition`~~ — ✅ shipped (composes with row 1 into end-to-end detector safety). ~~`check_stop`~~ — ✅ shipped (length-cap lifecycle invariant + index safety). ~~**Flagship `schedule()` token-budget loop**~~ — ✅ shipped: running-loop slices 1–3 (inductive step → multi-iteration cumulative → in-loop preemption) plus the waiting-queue prefill loop; **both budget surfaces of `schedule()` covered**. With this, **Tier 4 is complete.**
@@ -113,7 +119,7 @@ Cumulative target count and approximate `make verify` wall-clock at each milesto
 | Milestone | Cumulative targets | Wall-clock | Live findings to date |
 |---|---|---|---|
 | End of Tier 1 + both Tier 2 audits + seven Tier 2 harnesses + 1 contract-verification closure + Tier 3 rows 2–5 (current) | 28 entries | ~3 min 45 s | **7 findings** (filed and **fixed upstream by [#43794](https://github.com/vllm-project/vllm/pull/43794)**: #43496 + #43521 + #43532, plus the unfiled `--hash-block-size -k` propagation incidentally closed by the same PR's `gt=0`; **filed and open**: [#43842](https://github.com/vllm-project/vllm/issues/43842) `--num-gpu-blocks-override 0` bare `AssertionError`, and [#43985](https://github.com/vllm-project/vllm/issues/43985) bundling AUDIT Finding #5 `--max-logprobs <negative>` + Finding #6 `--long-prefill-token-threshold <negative>` silent acceptance). The `--block-size N` non-power-of-2 Tier-2 leftover is closed without a finding — post-#43794 backend-selection chain rejects cleanly; documented as AUDIT Finding #7. Tier 3 rows 2–5 shipped as contract-verification SUCCESSFUL targets (`popleft_n` / `append_n` / `get_new_blocks` at K = 4 + `allocate_slots` token accounting, each with a buggy counterpart). |
-| End of Tier 3 (all rows) | +0–2 entries → 28–30 (only the optional `get_usage` row 1 remains) | ~3–4 min | open |
+| End of Tier 3 (all rows, incl. optional `get_usage`) | 44 entries | ~5 min | open |
 | Tier 4 rows 1–3 + `schedule()` flagship (running slices 1–3 + waiting-queue) — both budget surfaces covered | 42 entries | ~5 min | open |
 | **Tier 4 complete** | — | — | — |
 

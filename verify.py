@@ -250,6 +250,18 @@ TARGETS: list[Target] = [
         safety_expected=None,
     ),
     Target(
+        name="block_pool_get_usage",
+        entry="block_pool_get_usage.py",
+        expected="SUCCESSFUL",
+        safety_expected="SUCCESSFUL",
+    ),
+    Target(
+        name="block_pool_get_usage_buggy",
+        entry="block_pool_get_usage_buggy.py",
+        expected="FAILED",
+        safety_expected=None,
+    ),
+    Target(
         name="has_repeating_pattern",
         entry="has_repeating_pattern.py",
         esbmc_args=("--unwind", "9"),

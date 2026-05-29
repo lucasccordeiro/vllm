@@ -73,6 +73,7 @@ engine. Structure mirrors the AWS-Neuron NKI PoC (see
 | 23 | `Scheduler.schedule()` token budget — multi-iteration loop (second slice) | `vllm/v1/core/sched/scheduler.py:366` (Tier-4 flagship; the running loop over K = 4 requests with `token_budget` carried across iterations — proves the cumulative `total <= initial budget` non-over-commit, catching the clamp-to-initial-budget bug a single iteration cannot) |
 | 24 | `Scheduler.schedule()` token budget — in-loop preemption (third slice) | `vllm/v1/core/sched/scheduler.py:443` (Tier-4 flagship; any interleaving of schedule-deduct and preemption-restore over K = 4 steps preserves `0 <= token_budget <= B` and the accounting identity `token_budget == B - sum_scheduled` — the restore never over-credits the budget) |
 | 25 | `Scheduler.schedule()` waiting-queue prefill loop | `vllm/v1/core/sched/scheduler.py:548` (Tier-4 flagship; the second budget surface — `num_new_tokens = num_tokens - num_computed_tokens`; proves `token_budget >= 0` and the loop's own production `assert num_new_tokens > 0` under the waiting-request invariant `num_computed_tokens < num_tokens`) |
+| 26 | `BlockPool.get_usage` div-by-zero safety | `vllm/v1/core/block_pool.py:497` (Tier-3 row 1, optional; proves the `if total_gpu_blocks == 0: return 0` early return guards the division — modelled via integer `//`, since ESBMC-Python does not model float `/`; the `0.0 ≤ usage ≤ 1.0` float contract is the arithmetic corollary of the verified `0 ≤ free ≤ total` invariant) |
 
 Targets 1–3 are pure integer helpers with explicit preconditions;
 both the non-buggy and buggy entries are toy contracts that
@@ -445,6 +446,8 @@ every non-buggy entry has > 0.
 | `scheduler_token_budget_preempt_buggy`           | FAILED (expected; preemption restore drops the `p <= sum_scheduled` bound, over-restores past `token_budget <= B`) | skipped | 17   |
 | `scheduler_token_budget_waiting`                 | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 2    |
 | `scheduler_token_budget_waiting_buggy`           | FAILED (expected; waiting-request invariant `num_computed_tokens < num_tokens` dropped, production `assert num_new_tokens > 0` fires) | skipped | 2    |
+| `block_pool_get_usage`                           | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 3    |
+| `block_pool_get_usage_buggy`                     | FAILED (expected; early return dropped, `free // total_gpu_blocks` divides by zero at `num_gpu_blocks == 1`) | skipped | 3    |
 | `next_power_of_2`          | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 5    |
 | `next_power_of_2_buggy`    | FAILED (expected)             | skipped                      | 5    |
 | `largest_power_of_2_divisor`       | SUCCESSFUL (expected) | SUCCESSFUL (expected)        | 39   |
