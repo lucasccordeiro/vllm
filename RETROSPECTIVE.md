@@ -46,6 +46,7 @@ A buggy entry whose Phase 1 already fails skips Phase 2 (matches AWS-Neuron's `t
 | `vllm/v1/core/kv_cache_manager.py` (`KVCacheManager.allocate_slots`) | KV-cache coordinator | **Tier-3** token-accounting + admission guard; SUCCESSFUL (7 VCCs); `min(…, max_model_len)` saturations + `num_blocks_to_allocate > get_num_free_blocks()`; buggy drops a `min()` saturation → FAILED |
 | `vllm/v1/core/sched/utils.py:10` (`_has_repeating_pattern`) | scheduler utils | **Tier-4** negative-index safety at K=8; SUCCESSFUL (3902 VCCs); proves every `token_ids[-(pattern_len*m+n)]` access is in bounds under the caller precondition; buggy drops the precondition → FAILED (out-of-bounds magnitude) |
 | `vllm/v1/core/sched/utils.py:28` (`check_sequence_repetition`) | scheduler utils | **Tier-4** guard-chain composition at len=8; SUCCESSFUL (5 VCCs); proves the sole caller establishes exactly the precondition `_has_repeating_pattern` assumes (loop abstracted by a monotonicity-justified symbolic `pattern_len`); buggy drops the `min_pattern_size <= 0 → 1` rewrite → FAILED (`1 <= pattern_len`) |
+| `vllm/v1/core/sched/utils.py:92` (`check_stop`) | scheduler utils | **Tier-4** length-cap lifecycle invariant + `output_token_ids[-1]` index safety; SUCCESSFUL (3 VCCs); a continuing request is within both caps (`num_tokens < max_model_len`, `num_output_tokens < max_tokens`); content branches nondet; latent precondition (`num_output_tokens >= 1`) documented; buggy inverts the cap `or`→`and` → FAILED |
 
 Pinned upstream commit: `vllm-project/vllm @ 4438b6e7d` (HEAD at session start).
 
