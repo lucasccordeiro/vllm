@@ -184,7 +184,7 @@ Pydantic enforces these at config-construction time. No further audit work neede
 | 3 | `num_gpu_blocks_override` | `--num-gpu-blocks-override` | `int \| None = None` (no constraint) | Propagates to `BlockPool.__init__(num_gpu_blocks=…)` at `vllm/v1/core/block_pool.py:157`, which asserts `num_gpu_blocks > 0`. Internal `AssertionError` (less clean than `ValueError`) for `0` or negative inputs. |
 | 4 | `max_model_len` | `--max-model-len` | `Field(default=None, ge=-1)` | `ge=-1` exists (so `-1` is the auto-derive sentinel), but `0` is also accepted. Reaches subtractive arithmetic in `vllm/v1/core/sched/scheduler.py:397` (`min(num_new_tokens, self.max_model_len - 1 - request.num_computed_tokens)`); with `max_model_len = 0`, the right-hand side is `-1 - num_computed_tokens` ≤ -1. Likely silent corruption or hang, depending on how `get_and_verify_max_len` (`vllm/config/model.py:1729`) normalises before reaching the scheduler. |
 | 5 | `max_logprobs` | `--max-logprobs` | `int = 20` (no constraint) | Negative or extremely large values reach logprob array slicing. |
-| 6 | `long_prefill_token_threshold` | `--long-prefill-token-threshold` | `int = 0` (no constraint; 0 is "off") | Used in `vllm/v1/core/sched/scheduler.py:395` (`if 0 < self.scheduler_config.long_prefill_token_threshold < num_new_tokens: num_new_tokens = self.scheduler_config.long_prefill_token_threshold`). The `0 < ...` guard handles the default but treats *negative* as "off" too — possibly intended, possibly silent. |
+| 6 | `long_prefill_token_threshold` | `--long-prefill-token-threshold` | `int = 0` (no constraint; 0 is "off") | Used in `vllm/v1/core/sched/scheduler.py:390` (`if 0 < self.scheduler_config.long_prefill_token_threshold < num_new_tokens: num_new_tokens = self.scheduler_config.long_prefill_token_threshold`). The `0 < ...` guard handles the default but treats *negative* as "off" too — possibly intended, possibly silent. |
 
 ### Programmatic-only fields (lower priority; included for completeness)
 
@@ -204,8 +204,8 @@ dedicated finding sections below (referenced here only by outcome):
 
 1. ~~**`--num-gpu-blocks-override 0` / negative**~~ — ✅ filed as [vllm-project/vllm#43842](https://github.com/vllm-project/vllm/issues/43842) (open). See **Finding #4**.
 2. ~~**`--max-model-len 0`**~~ — ✅ filed as [vllm-project/vllm#43532](https://github.com/vllm-project/vllm/issues/43532), fixed upstream by [#43794](https://github.com/vllm-project/vllm/pull/43794). See **Finding #3**.
-3. ~~**`--max-logprobs` negative**~~ — ✅ silent-config-acceptance defect; not filed (cosmetic blast radius). See **Finding #5**.
-4. ~~**`--long-prefill-token-threshold` negative**~~ — ✅ silent-config-acceptance defect; not filed. See **Finding #6**.
+3. ~~**`--max-logprobs` negative**~~ — ✅ silent-config-acceptance defect; filed (bundled with Finding #6) as [vllm-project/vllm#43985](https://github.com/vllm-project/vllm/issues/43985). See **Finding #5**.
+4. ~~**`--long-prefill-token-threshold` negative**~~ — ✅ silent-config-acceptance defect; filed as [vllm-project/vllm#43985](https://github.com/vllm-project/vllm/issues/43985). See **Finding #6**.
 
 ## Finding #3 — `--max-model-len 0` silent negative-num_new_tokens propagation
 
@@ -390,13 +390,13 @@ Replace the bare assertion with an early validator on `CacheConfig`. Two natural
 
 ## Finding #5 — `--max-logprobs <negative>` silent-config-acceptance
 
-**Filing decision**: not filed upstream yet. Severity is cosmetic (see *Severity* below); decision deferred pending a bundled "config-validation tightening" PR rather than a one-off issue. Logged here for completeness and as evidence the broader-audit methodology continues to surface the same field-level admission shape across the codebase.
+**Filing decision**: filed upstream (2026-05-29) as [vllm-project/vllm#43985](https://github.com/vllm-project/vllm/issues/43985), bundled with Finding #6 (same field-level admission shape, same one-line `field_validator` fix). Severity is cosmetic (see *Severity* below), which is why it was bundled into one low-severity report rather than a one-off issue per field.
 
 ### Trace
 
 1. **CLI** (`vllm/engine/arg_utils.py:525, :821`): `--max-logprobs` is wired to `ModelConfig.max_logprobs` via the standard `get_kwargs(ModelConfig)` derivation. The field is declared `int = 20` at `vllm/config/model.py:234` with no `Field(gt=0)` / `ge=0` constraint; argparse coerces any int and Pydantic admits it without complaint.
 
-2. **Validator** (`vllm/sampling_params.py:713`, `_validate_logprobs`):
+2. **Validator** (`vllm/sampling_params.py:680`, `_validate_logprobs`):
 
    ```python
    max_logprobs = model_config.max_logprobs
@@ -442,7 +442,7 @@ from vllm.config.model import ModelConfig
 ml = next(f for f in dataclasses.fields(ModelConfig) if f.name == "max_logprobs")
 assert dict(ml.metadata) == {}                # no Pydantic constraint
 
-# Modelling vllm/sampling_params.py:713-728 with cap = -5.
+# Modelling vllm/sampling_params.py:680-695 with cap = -5.
 def validate_logprobs(cap, user_logprobs, vocab_size=32000):
     if cap == -1:
         cap = vocab_size
@@ -491,7 +491,7 @@ def _check_max_logprobs(cls, v):
 
 ## Finding #6 — `--long-prefill-token-threshold <negative>` silent-config-acceptance
 
-**Filing decision**: not filed upstream yet. Severity is cosmetic (silent no-op rather than crash or silent corruption). Logged here; will be bundled into the same "config-validation tightening" follow-up as Finding #5 if upstream accepts that shape.
+**Filing decision**: filed upstream (2026-05-29) as [vllm-project/vllm#43985](https://github.com/vllm-project/vllm/issues/43985), bundled with Finding #5 in one low-severity config-validation report (both share the field-level admission shape and the one-line `field_validator` fix). Severity is cosmetic (silent no-op rather than crash or silent corruption).
 
 ### Trace
 
@@ -510,7 +510,7 @@ def _check_max_logprobs(cls, v):
 
    A negative threshold survives both branches unchanged (it is not `== 0` and the encoder-decoder branch fires only for encoder-decoder models). The downstream sanity check at line 295 (`if self.long_prefill_token_threshold > max_model_len: raise ValueError(...)`) catches only the too-large case; negatives slip past silently. The mamba-cache constraint at `vllm/config/vllm.py:2079` (`if self.scheduler_config.long_prefill_token_threshold > 0: assert ... >= block_size`) is also guarded by `> 0`; negatives skip this assertion.
 
-3. **Scheduler guard** (`vllm/v1/core/sched/scheduler.py:395`):
+3. **Scheduler guard** (`vllm/v1/core/sched/scheduler.py:390`):
 
    ```python
    if 0 < self.scheduler_config.long_prefill_token_threshold < num_new_tokens:
@@ -552,7 +552,7 @@ sc = SchedulerConfig(
 )
 assert sc.long_prefill_token_threshold == -5  # stored verbatim
 
-# Inline of vllm/v1/core/sched/scheduler.py:395 with the bad value.
+# Inline of vllm/v1/core/sched/scheduler.py:390 with the bad value.
 threshold, num_new_tokens = sc.long_prefill_token_threshold, 1024
 original = num_new_tokens
 if 0 < threshold < num_new_tokens:

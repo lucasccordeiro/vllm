@@ -20,10 +20,12 @@ failures.
 [`AUDIT.md`](./AUDIT.md)): three fixed upstream by PR #43794
 (`--block-size 0`, `--hash-block-size 0`, `--max-model-len 0`), a
 fourth (`--hash-block-size -k`) incidentally closed by the same
-`gt=0` constraint, one filed and open
-([#43842](https://github.com/vllm-project/vllm/issues/43842),
-`--num-gpu-blocks-override 0`), and two unfiled silent-acceptance
-defects (`--max-logprobs`/`--long-prefill-token-threshold` negatives).
+`gt=0` constraint, two filed and open
+([#43842](https://github.com/vllm-project/vllm/issues/43842)
+`--num-gpu-blocks-override 0`; and
+[#43985](https://github.com/vllm-project/vllm/issues/43985), bundling the
+two silent-acceptance defects `--max-logprobs`/`--long-prefill-token-threshold`
+negatives).
 Three ESBMC frontend issues were filed along the way
 ([#4926](https://github.com/esbmc/esbmc/issues/4926),
 [#4909](https://github.com/esbmc/esbmc/issues/4909),
