@@ -74,6 +74,7 @@ engine. Structure mirrors the AWS-Neuron NKI PoC (see
 | 24 | `Scheduler.schedule()` token budget — in-loop preemption (third slice) | `vllm/v1/core/sched/scheduler.py:443` (Tier-4 flagship; any interleaving of schedule-deduct and preemption-restore over K = 4 steps preserves `0 <= token_budget <= B` and the accounting identity `token_budget == B - sum_scheduled` — the restore never over-credits the budget) |
 | 25 | `Scheduler.schedule()` waiting-queue prefill loop | `vllm/v1/core/sched/scheduler.py:548` (Tier-4 flagship; the second budget surface — `num_new_tokens = num_tokens - num_computed_tokens`; proves `token_budget >= 0` and the loop's own production `assert num_new_tokens > 0` under the waiting-request invariant `num_computed_tokens < num_tokens`) |
 | 26 | `BlockPool.get_usage` div-by-zero safety | `vllm/v1/core/block_pool.py:497` (Tier-3 row 1, optional; proves the `if total_gpu_blocks == 0: return 0` early return guards the division — modelled via integer `//`, since ESBMC-Python does not model float `/`; the `0.0 ≤ usage ≤ 1.0` float contract is the arithmetic corollary of the verified `0 ≤ free ≤ total` invariant) |
+| 27 | `max_num_scheduled_tokens` negative budget (live finding, **programmatic — not CLI**) | `vllm/v1/core/sched/scheduler.py:348,829` (eighth live finding, from the programmatic-int-fields audit; `SchedulerConfig.max_num_scheduled_tokens` has no constraint and the only `<= 0` guard — `vllm/config/vllm.py:1566` — is gated behind `speculative_config is not None`. Without spec decoding a negative survives, the truthiness fallback at `scheduler.py:104` propagates it, and `schedule()` trips the bare `assert token_budget >= 0`. A *gated*-guard inconsistency, same bare-`AssertionError` class as #43842) |
 
 Targets 1–3 are pure integer helpers with explicit preconditions;
 both the non-buggy and buggy entries are toy contracts that
@@ -448,6 +449,7 @@ every non-buggy entry has > 0.
 | `scheduler_token_budget_waiting_buggy`           | FAILED (expected; waiting-request invariant `num_computed_tokens < num_tokens` dropped, production `assert num_new_tokens > 0` fires) | skipped | 2    |
 | `block_pool_get_usage`                           | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 3    |
 | `block_pool_get_usage_buggy`                     | FAILED (expected; early return dropped, `free // total_gpu_blocks` divides by zero at `num_gpu_blocks == 1`) | skipped | 3    |
+| `max_num_scheduled_tokens_negative`              | **FAILED (live bug witness, programmatic — not CLI; `spec_config_present=0, max_num_scheduled_tokens=-1` → `token_budget=-1`, bare `assert token_budget >= 0` at `scheduler.py:829`; gated-guard inconsistency, same class as [#43842](https://github.com/vllm-project/vllm/issues/43842))** | skipped | 1    |
 | `next_power_of_2`          | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 5    |
 | `next_power_of_2_buggy`    | FAILED (expected)             | skipped                      | 5    |
 | `largest_power_of_2_divisor`       | SUCCESSFUL (expected) | SUCCESSFUL (expected)        | 39   |

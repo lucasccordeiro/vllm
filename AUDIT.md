@@ -639,6 +639,76 @@ Reproduced in the same sandbox install used for prior findings.
 
 Not filed upstream. No defect to fix; the chain is sound.
 
+## Finding #8 — `max_num_scheduled_tokens` negative → bare `AssertionError` in `schedule()` (programmatic, gated guard)
+
+**Status**: harnessed (`max_num_scheduled_tokens_negative.py`, Phase 1 FAILED, `vcc=1`), static trace confirmed against pinned `4438b6e7d`. **Not yet filed** — see *Filing decision*. This is the first finding from the *programmatic-only* field list (above), not the CLI surface; its reachability is materially weaker than Findings #2–#6 and is the crux of whether it merits an upstream issue.
+
+### What makes this one different
+
+Findings #2–#6 are all **CLI-reachable** (`vllm serve --flag <bad>`). This field is **not CLI-wired** — there is no `arg_utils.py` argument for it. It is a public `SchedulerConfig` field whose docstring says it "should be set in `EngineArgs.create_engine_config`", i.e. an internal-but-public knob. Triggering the bug requires constructing `SchedulerConfig(max_num_scheduled_tokens=<negative>)` (or the equivalent `VllmConfig`) programmatically, **without** speculative decoding.
+
+The defect is also not a *missing* guard but a *gated* one: the validation exists, but only fires under speculative decoding. The same invalid value is a clean `ValueError` under spec decoding and a bare `AssertionError` deep in `schedule()` without it.
+
+### Trace (against pinned `4438b6e7d`)
+
+1. **Field** (`vllm/config/scheduler.py:56`): `max_num_scheduled_tokens: int | None = None` — no `Field(gt=/ge=)`. `SchedulerConfig.__post_init__` raises `ValueError` for several other fields but never references this one, so any int (incl. negative) survives construction.
+
+2. **Gated guard** (`vllm/config/vllm.py`): the only `<= 0` check —
+
+   ```python
+   if self.scheduler_config.max_num_scheduled_tokens <= 0:   # vllm.py:1566
+       raise ValueError(...)
+   ```
+
+   sits inside `_set_max_num_scheduled_tokens` (def at `vllm.py:1547`), whose **entire body** is gated behind `if self.speculative_config is not None:` (`vllm.py:1555`). Without speculative decoding the method is a no-op for this field.
+
+3. **Truthiness fallback** (`vllm/v1/core/sched/scheduler.py:104`):
+
+   ```python
+   self.max_num_scheduled_tokens = (
+       self.scheduler_config.max_num_scheduled_tokens
+       if self.scheduler_config.max_num_scheduled_tokens   # truthiness, NOT == 0
+       else self.scheduler_config.max_num_batched_tokens
+   )
+   ```
+
+   `0`/`None` are falsy and fall back safely; a **negative** value is truthy and propagates.
+
+4. **Budget + bare assert** (`scheduler.py:348` then `829`):
+
+   ```python
+   token_budget = self.max_num_scheduled_tokens   # = negative
+   ...
+   assert token_budget >= 0                        # bare AssertionError
+   ```
+
+   (and `assert total_num_scheduled_tokens <= self.max_num_scheduled_tokens` at `scheduler.py:827`). Same bare-`AssertionError` UX class as #43842.
+
+### ESBMC counterexample
+
+Phase 1, `vcc=1`, FAILED:
+
+```
+Violated property:
+  file harness/max_num_scheduled_tokens_negative.py line 98 function main
+  assertion token_budget >= 0
+
+  max_num_scheduled_tokens = -1
+  spec_config_present = 0
+  effective = -1
+  token_budget = -1
+```
+
+The witness lives entirely on the no-spec branch (`spec_config_present = 0`), confirming the guard gating is what exposes it.
+
+### Severity
+
+Low-to-moderate. Loud failure (assert, not silent corruption), but bare and internal. Reachability is programmatic-only, so an end user running `vllm serve` cannot trigger it via flags — it bites integrators constructing configs directly, or any future code path that computes this field negatively without spec decoding. The strongest framing is the **inconsistency**: validation that is present-and-clean under one config and absent-and-cryptic under another.
+
+### Filing decision
+
+**Deferred to the maintainer's call.** Given the programmatic-only reachability, this is a weaker filing candidate than #43842/#43985. Options: (a) file as a low-severity "ungate the `<= 0` guard / add `Field(ge=1)`" hardening issue; (b) fold into a future config-validation-audit PR rather than a standalone issue; (c) document only. Empirical end-to-end reproduction (constructing the config) is pending a vLLM install in the sandbox.
+
 ## Out of scope (this audit)
 
 - **Argparse `int` parameters not declared `SkipValidation`**. ~~Many of these have `Field(gt=0)` or similar Pydantic constraints; some may not. A broader audit covering all of `arg_utils.py`'s `int` flags is queued for ROADMAP Tier 2 follow-up.~~ ✅ Shipped (above).
