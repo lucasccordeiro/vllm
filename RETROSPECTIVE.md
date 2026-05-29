@@ -45,6 +45,7 @@ A buggy entry whose Phase 1 already fails skips Phase 2 (matches AWS-Neuron's `t
 | `vllm/v1/core/block_pool.py` (`BlockPool.get_new_blocks`) | KV-cache block pool | **Tier-3** ref-counting layer at K=4; SUCCESSFUL (3168 VCCs); proves `ref_cnt 0→1`, no-double-return, raise-on-insufficient guard; buggy returns a block twice → FAILED at the production `ref_cnt==0` assert |
 | `vllm/v1/core/kv_cache_manager.py` (`KVCacheManager.allocate_slots`) | KV-cache coordinator | **Tier-3** token-accounting + admission guard; SUCCESSFUL (7 VCCs); `min(…, max_model_len)` saturations + `num_blocks_to_allocate > get_num_free_blocks()`; buggy drops a `min()` saturation → FAILED |
 | `vllm/v1/core/sched/utils.py:10` (`_has_repeating_pattern`) | scheduler utils | **Tier-4** negative-index safety at K=8; SUCCESSFUL (3902 VCCs); proves every `token_ids[-(pattern_len*m+n)]` access is in bounds under the caller precondition; buggy drops the precondition → FAILED (out-of-bounds magnitude) |
+| `vllm/v1/core/sched/utils.py:28` (`check_sequence_repetition`) | scheduler utils | **Tier-4** guard-chain composition at len=8; SUCCESSFUL (5 VCCs); proves the sole caller establishes exactly the precondition `_has_repeating_pattern` assumes (loop abstracted by a monotonicity-justified symbolic `pattern_len`); buggy drops the `min_pattern_size <= 0 → 1` rewrite → FAILED (`1 <= pattern_len`) |
 
 Pinned upstream commit: `vllm-project/vllm @ 4438b6e7d` (HEAD at session start).
 
