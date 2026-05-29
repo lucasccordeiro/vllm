@@ -69,6 +69,7 @@ engine. Structure mirrors the AWS-Neuron NKI PoC (see
 | 19 | `_has_repeating_pattern` negative-index safety at K = 8 | `vllm/v1/core/sched/utils.py:10` (first Tier-4 scheduler-invariant target; proves every `token_ids[-(pattern_len*m+n)]` access is in bounds under the caller precondition `pattern_len * min_count <= len`) |
 | 20 | `check_sequence_repetition` guard chain at len = 8 | `vllm/v1/core/sched/utils.py:28` (Tier-4 row 2; the sole caller of #19 — proves its guard chain establishes exactly the precondition #19 assumes, composing into end-to-end repetition-detector safety) |
 | 21 | `check_stop` length-cap lifecycle + index safety | `vllm/v1/core/sched/utils.py:92` (Tier-4 row 3; a continuing request is within both length caps — `num_tokens < max_model_len` and `num_output_tokens < max_tokens` — and the `output_token_ids[-1]` access is in bounds under the caller invariant) |
+| 22 | `Scheduler.schedule()` token-budget invariant (first slice) | `vllm/v1/core/sched/scheduler.py:656,672` (Tier-4 flagship; the running-loop inductive step + preemption-restore preserve `token_budget >= 0` and yield `num_new_tokens >= 0`, composing with #21's length-cap invariant) |
 
 Targets 1–3 are pure integer helpers with explicit preconditions;
 both the non-buggy and buggy entries are toy contracts that
@@ -433,6 +434,8 @@ every non-buggy entry has > 0.
 | `check_sequence_repetition_buggy`                | FAILED (expected; `min_pattern_size <= 0 → 1` rewrite dropped, `1 <= pattern_len` precondition violated) | skipped | 5    |
 | `check_stop` (len = 8)                           | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 3    |
 | `check_stop_buggy`                               | FAILED (expected; length-cap `or`→`and`, continuing request exceeds `max_model_len`) | skipped | 3    |
+| `scheduler_token_budget` (first slice)           | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 3    |
+| `scheduler_token_budget_buggy`                   | FAILED (expected; `min(num_new_tokens, token_budget)` clamp dropped, `token_budget >= 0` invariant violated) | skipped | 2    |
 | `next_power_of_2`          | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 5    |
 | `next_power_of_2_buggy`    | FAILED (expected)             | skipped                      | 5    |
 | `largest_power_of_2_divisor`       | SUCCESSFUL (expected) | SUCCESSFUL (expected)        | 39   |
