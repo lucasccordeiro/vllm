@@ -71,6 +71,7 @@ engine. Structure mirrors the AWS-Neuron NKI PoC (see
 | 21 | `check_stop` length-cap lifecycle + index safety | `vllm/v1/core/sched/utils.py:92` (Tier-4 row 3; a continuing request is within both length caps — `num_tokens < max_model_len` and `num_output_tokens < max_tokens` — and the `output_token_ids[-1]` access is in bounds under the caller invariant) |
 | 22 | `Scheduler.schedule()` token-budget invariant (first slice) | `vllm/v1/core/sched/scheduler.py:348,366` (Tier-4 flagship; the running-loop inductive step + preemption-restore preserve `token_budget >= 0` and yield `num_new_tokens >= 0`, composing with #21's length-cap invariant) |
 | 23 | `Scheduler.schedule()` token budget — multi-iteration loop (second slice) | `vllm/v1/core/sched/scheduler.py:366` (Tier-4 flagship; the running loop over K = 4 requests with `token_budget` carried across iterations — proves the cumulative `total <= initial budget` non-over-commit, catching the clamp-to-initial-budget bug a single iteration cannot) |
+| 24 | `Scheduler.schedule()` token budget — in-loop preemption (third slice) | `vllm/v1/core/sched/scheduler.py:443` (Tier-4 flagship; any interleaving of schedule-deduct and preemption-restore over K = 4 steps preserves `0 <= token_budget <= B` and the accounting identity `token_budget == B - sum_scheduled` — the restore never over-credits the budget) |
 
 Targets 1–3 are pure integer helpers with explicit preconditions;
 both the non-buggy and buggy entries are toy contracts that
@@ -439,6 +440,8 @@ every non-buggy entry has > 0.
 | `scheduler_token_budget_buggy`                   | FAILED (expected; `min(num_new_tokens, token_budget)` clamp dropped, `token_budget >= 0` invariant violated) | skipped | 2    |
 | `scheduler_token_budget_loop` (K = 4)            | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 11   |
 | `scheduler_token_budget_loop_buggy`              | FAILED (expected; clamps to initial budget B not current `token_budget`, cumulative over-commit drives `token_budget < 0` on a later iteration) | skipped | 11   |
+| `scheduler_token_budget_preempt` (K = 4)         | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 17   |
+| `scheduler_token_budget_preempt_buggy`           | FAILED (expected; preemption restore drops the `p <= sum_scheduled` bound, over-restores past `token_budget <= B`) | skipped | 17   |
 | `next_power_of_2`          | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 5    |
 | `next_power_of_2_buggy`    | FAILED (expected)             | skipped                      | 5    |
 | `largest_power_of_2_divisor`       | SUCCESSFUL (expected) | SUCCESSFUL (expected)        | 39   |
