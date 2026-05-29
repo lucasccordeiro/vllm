@@ -275,6 +275,18 @@ TARGETS: list[Target] = [
         expected="FAILED",
         safety_expected=None,
     ),
+    Target(
+        name="check_stop",
+        entry="check_stop.py",
+        expected="SUCCESSFUL",
+        safety_expected="SUCCESSFUL",
+    ),
+    Target(
+        name="check_stop_buggy",
+        entry="check_stop_buggy.py",
+        expected="FAILED",
+        safety_expected=None,
+    ),
     # The next four targets use loop reimplementations of upstream's
     # bit-trick functions (see harness headers for the equivalence
     # argument). --unwind 32 covers the longest loop the
