@@ -34,7 +34,7 @@
 # Free-list representation. Identical parallel-array-with-integer-
 # sentinel model as free_kv_cache_block_queue_popleft_n.py; see that
 # header for the full design rationale (PEP 604 / Optional / nested-
-# attribute frontend gaps; HEAD = 4, TAIL = 5, NIL = -1; the
+# attribute frontend gaps; HEAD = K, TAIL = K + 1, NIL = -1; the
 # `if i < n:` positive-condition loop style that avoids the implicit
 # secondary-loop expansion). The free list starts full: 4 live blocks
 # linked 0 -> 1 -> 2 -> 3, block_id[slot] == slot, all ref_cnt 0.
@@ -60,8 +60,8 @@ from stubs import nondet_int, __ESBMC_assume
 
 K = 4
 NIL = -1
-HEAD = 4
-TAIL = 5
+HEAD = K
+TAIL = K + 1
 
 
 def main() -> None:
@@ -102,7 +102,7 @@ def main() -> None:
     # free_kv_cache_block_queue_popleft_n.py). ret holds the popped
     # block_ids in slot order; only the first num_blocks entries are
     # written.
-    ret = [-1, -1, -1, -1]
+    ret = [NIL, NIL, NIL, NIL]
     if num_blocks > 0:
         assert num_free_blocks >= num_blocks
         num_free_blocks -= num_blocks

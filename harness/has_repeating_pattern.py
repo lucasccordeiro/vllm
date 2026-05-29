@@ -33,15 +33,12 @@
 # proves the bound holds for every (n, m) the loops reach.
 #
 # Two ESBMC-Python 8.3.0 frontend facts shaped this harness:
-#   (a) Negative-literal subscripts `a[-i]` crash GOTO generation
-#       (the nlohmann::json::operator[] assert at json.hpp:2147, same
-#       class documented in free_kv_cache_block_queue_popleft_n.py).
-#       The crash is specific to a unary minus over a *non-constant*
-#       operand: `a[-1]` (constant) and `a[len - i]` (computed) both
-#       work; only `a[-i]` crashes. Every `token_ids[-i]` is therefore
-#       rewritten to the positive equivalent `token_ids[K - i]` (len ==
-#       K is concrete). Filed upstream as esbmc/esbmc#4926.
-#   (b) The frontend emits no array-bounds VCC for a computed list
+#   (a) Earlier ESBMC builds crashed at GOTO generation on a unary-minus
+#       subscript over a *non-constant* operand (`a[-i]`; filed as
+#       esbmc/esbmc#4926), which forced the positive rewrite
+#       `token_ids[K - i]`. That bug is fixed, so the accesses use the
+#       verbatim upstream negative-index form `token_ids[-i]` again.
+#   (b) The frontend still emits no array-bounds VCC for a list
 #       subscript, so the safety obligation is encoded as explicit
 #       `1 <= i and i <= K` assertions placed *before* each access.
 #       These are the load-bearing checks; the subscripts themselves
@@ -102,17 +99,17 @@ def main() -> None:
     checksum = 0
     for n in range(1, K + 1):
         if n <= pattern_len:
-            # token_ids[-n] -> token_ids[K - n]; safe iff 1 <= n <= K.
+            # token_ids[-n]: safe iff 1 <= n <= K (the obligation asserted).
             assert 1 <= n and n <= K
-            target_token = token_ids[K - n]
+            target_token = token_ids[-n]
             checksum = checksum + target_token
             for m in range(1, K):
                 if m < repetition_min_count:  # m in [1, min_count - 1]
                     magnitude = pattern_len * m + n
-                    # token_ids[-(pattern_len*m+n)] -> token_ids[K - mag];
-                    # safe iff 1 <= magnitude <= K. This is the obligation.
+                    # token_ids[-(pattern_len*m+n)]: safe iff
+                    # 1 <= magnitude <= K. This is the obligation.
                     assert 1 <= magnitude and magnitude <= K
-                    checksum = checksum + token_ids[K - magnitude]
+                    checksum = checksum + token_ids[-magnitude]
 
     # Keep the reads live (concrete contents are all >= 0).
     assert checksum >= 0

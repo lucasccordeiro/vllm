@@ -4,7 +4,7 @@
 Tiers 1–4 verified end-to-end **under real symbolic execution** (see
 §11 for the methodology audit and fix). Full `make verify` (30 entries
 × two phases) completes in ~4 min on aarch64 macOS with 0 failures.
-Per-entry VCC counts span 1 (CLI-path live-bug witnesses) to 6816
+Per-entry VCC counts span 1 (CLI-path live-bug witnesses) to 6896
 (`has_repeating_pattern` Phase 2); every non-buggy entry generates
 > 0 VCCs, enforced by the vacuity guard in `verify.py`.
 
@@ -427,8 +427,8 @@ every non-buggy entry has > 0.
 | `block_pool_get_new_blocks_buggy`                | FAILED (expected; non-advancing pop returns a block twice, production `assert block.ref_cnt == 0` violated) | skipped | 1286 |
 | `kv_cache_manager_allocate_slots`                | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 7    |
 | `kv_cache_manager_allocate_slots_buggy`          | FAILED (expected; `min(…, max_model_len)` saturation dropped, P3 `num_tokens_need_slot <= max_model_len` violated) | skipped | 1    |
-| `has_repeating_pattern` (K = 8)                  | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 3902 |
-| `has_repeating_pattern_buggy`                    | FAILED (expected; caller precondition dropped, negative index `magnitude <= K` out of bounds) | skipped | 3902 |
+| `has_repeating_pattern` (K = 8)                  | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 3982 |
+| `has_repeating_pattern_buggy`                    | FAILED (expected; caller precondition dropped, negative index `magnitude <= K` out of bounds) | skipped | 3982 |
 | `check_sequence_repetition` (len = 8)            | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 5    |
 | `check_sequence_repetition_buggy`                | FAILED (expected; `min_pattern_size <= 0 → 1` rewrite dropped, `1 <= pattern_len` precondition violated) | skipped | 5    |
 | `check_stop` (len = 8)                           | SUCCESSFUL (expected)         | SUCCESSFUL (expected)        | 3    |

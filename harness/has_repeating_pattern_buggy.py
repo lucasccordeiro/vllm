@@ -38,7 +38,7 @@ def main() -> None:
     for n in range(1, K + 1):
         if n <= pattern_len:
             assert 1 <= n and n <= K
-            target_token = token_ids[K - n]
+            target_token = token_ids[-n]
             checksum = checksum + target_token
             for m in range(1, K):
                 if m < repetition_min_count:
@@ -46,7 +46,7 @@ def main() -> None:
                     # FAILS: without the precondition, magnitude can
                     # exceed K, i.e. the negative index is out of range.
                     assert 1 <= magnitude and magnitude <= K
-                    checksum = checksum + token_ids[K - magnitude]
+                    checksum = checksum + token_ids[-magnitude]
 
     assert checksum >= 0
 

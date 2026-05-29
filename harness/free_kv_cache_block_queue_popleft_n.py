@@ -82,17 +82,16 @@
 
 from stubs import nondet_int, __ESBMC_assume
 
-# Concrete bounds. ESBMC-Python 8.3.0 crashes at GOTO-IR generation
-# (`nlohmann::json::operator[]` assert) when a module-level int
-# constant is initialised from an expression over another module-
-# level int constant (observed: `HEAD = K`, `TAIL = K + 1`).
-# Workaround: hard-code the sentinel values as literals. The K = 4
-# choice is reflected in the literal HEAD / TAIL below; bumping K
-# requires updating all three.
+# Concrete bounds. The sentinels are derived from K. (Earlier ESBMC
+# builds crashed at GOTO-IR generation when a module-level constant was
+# initialised from an expression over another module-level constant —
+# `HEAD = K`, `TAIL = K + 1` — filed as esbmc/esbmc#4909, which forced
+# hard-coded literals here. That bug is fixed; the workaround is retired
+# and the sentinels are written in terms of K again.)
 K = 4
 NIL = -1
-HEAD = 4          # sentinel slot index for the fake free-list head
-TAIL = 5          # sentinel slot index for the fake free-list tail
+HEAD = K          # sentinel slot index for the fake free-list head
+TAIL = K + 1      # sentinel slot index for the fake free-list tail
 
 
 def main() -> None:
@@ -124,7 +123,7 @@ def main() -> None:
     # Track the popped block_ids in slot order. The upstream `ret`
     # list has length n; we use a concrete K-slot array and write
     # only the first n entries.
-    ret = [-1, -1, -1, -1]
+    ret = [NIL, NIL, NIL, NIL]
     for i in range(K):
         if i < n:
             # Upstream `assert curr_block is not None`. In our
