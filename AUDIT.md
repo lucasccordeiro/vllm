@@ -701,13 +701,43 @@ Violated property:
 
 The witness lives entirely on the no-spec branch (`spec_config_present = 0`), confirming the guard gating is what exposes it.
 
+### Empirical reproduction
+
+Reproduced against the source tree at `4438b6e7d` (`vllm.__version__ == 0.1.dev1+g4438b6e7d`), CPU-only, no model/GPU:
+
+```python
+import vllm
+from vllm.config.scheduler import SchedulerConfig
+from vllm.config.vllm import VllmConfig
+
+# 1. SchedulerConfig accepts -1 with no validation.
+sched = SchedulerConfig(max_num_scheduled_tokens=-1,
+                        max_model_len=2048, is_encoder_decoder=False)
+assert sched.max_num_scheduled_tokens == -1
+
+# 2. A real VllmConfig with speculative_config is None leaves -1 intact
+#    after __post_init__ -> _set_max_num_scheduled_tokens (guard gated).
+vc = VllmConfig(scheduler_config=sched)
+assert vc.speculative_config is None
+assert vc.scheduler_config.max_num_scheduled_tokens == -1     # guard skipped
+
+# 3. scheduler.py:104 truthiness fallback keeps the negative.
+sc = vc.scheduler_config
+effective = (sc.max_num_scheduled_tokens
+             if sc.max_num_scheduled_tokens else sc.max_num_batched_tokens)
+assert effective == -1                                        # propagates
+# 4. token_budget = -1 -> `assert token_budget >= 0` (scheduler.py:829) fails.
+```
+
+Steps 1–2 are behavioral on real vLLM objects (the gate is genuinely skipped, not just inferred from source); step 3 evaluates the verbatim `scheduler.py:104` expression on the resolved config.
+
 ### Severity
 
 Low-to-moderate. Loud failure (assert, not silent corruption), but bare and internal. Reachability is programmatic-only, so an end user running `vllm serve` cannot trigger it via flags — it bites integrators constructing configs directly, or any future code path that computes this field negatively without spec decoding. The strongest framing is the **inconsistency**: validation that is present-and-clean under one config and absent-and-cryptic under another.
 
 ### Filing decision
 
-**Deferred to the maintainer's call.** Given the programmatic-only reachability, this is a weaker filing candidate than #43842/#43985. Options: (a) file as a low-severity "ungate the `<= 0` guard / add `Field(ge=1)`" hardening issue; (b) fold into a future config-validation-audit PR rather than a standalone issue; (c) document only. Empirical end-to-end reproduction (constructing the config) is pending a vLLM install in the sandbox.
+**Deferred to the maintainer's call.** Given the programmatic-only reachability, this is a weaker filing candidate than #43842/#43985. Options: (a) file as a low-severity "ungate the `<= 0` guard / add `Field(ge=1)`" hardening issue; (b) fold into a future config-validation-audit PR rather than a standalone issue; (c) document only. Empirical reproduction is complete (see above): a real `VllmConfig` with no speculative decoding leaves the negative intact.
 
 ## Out of scope (this audit)
 
