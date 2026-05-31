@@ -186,6 +186,23 @@ TARGETS: list[Target] = [
         expected="FAILED",
         safety_expected=None,
     ),
+    Target(
+        # Eighth live-bug candidate, from the programmatic-int-fields
+        # audit: a negative max_num_scheduled_tokens. NOT CLI-wired --
+        # it is a public SchedulerConfig field (int|None=None, no gt=/
+        # ge=, no __post_init__ guard). The only <= 0 guard lives in
+        # VllmConfig._set_max_num_scheduled_tokens but is gated behind
+        # `speculative_config is not None`, so without spec decoding a
+        # negative value survives. Scheduler.__init__'s truthiness
+        # fallback propagates it (negative is truthy), and schedule()
+        # trips the bare `assert token_budget >= 0` (scheduler.py:829).
+        # Same bare-AssertionError class as #43842, with the twist that
+        # the guard exists but does not cover the non-spec path.
+        name="max_num_scheduled_tokens_negative",
+        entry="max_num_scheduled_tokens_negative.py",
+        expected="FAILED",
+        safety_expected=None,
+    ),
     # Tier-3 data-structure targets at concrete K = 4. First
     # harnesses to model a non-trivial structure (doubly-linked
     # free-list with fake head/tail sentinels). Represent the
