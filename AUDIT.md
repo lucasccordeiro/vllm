@@ -641,7 +641,7 @@ Not filed upstream. No defect to fix; the chain is sound.
 
 ## Finding #8 — `max_num_scheduled_tokens` negative → bare `AssertionError` in `schedule()` (programmatic, gated guard)
 
-**Status**: harnessed (`max_num_scheduled_tokens_negative.py`, Phase 1 FAILED, `vcc=1`), static trace confirmed against pinned `4438b6e7d`. **Not yet filed** — see *Filing decision*. This is the first finding from the *programmatic-only* field list (above), not the CLI surface; its reachability is materially weaker than Findings #2–#6 and is the crux of whether it merits an upstream issue.
+**Filed**: [vllm-project/vllm#44123](https://github.com/vllm-project/vllm/issues/44123) (open). Harnessed (`max_num_scheduled_tokens_negative.py`, Phase 1 FAILED, `vcc=1`) and empirically reproduced (see below) against pinned `4438b6e7d`. This is the first finding from the *programmatic-only* field list (above), not the CLI surface; its reachability is materially weaker than Findings #2–#6, so it was filed as an explicitly lower-severity, integrator-facing report.
 
 ### What makes this one different
 
@@ -737,7 +737,7 @@ Low-to-moderate. Loud failure (assert, not silent corruption), but bare and inte
 
 ### Filing decision
 
-**Deferred to the maintainer's call.** Given the programmatic-only reachability, this is a weaker filing candidate than #43842/#43985. Options: (a) file as a low-severity "ungate the `<= 0` guard / add `Field(ge=1)`" hardening issue; (b) fold into a future config-validation-audit PR rather than a standalone issue; (c) document only. Empirical reproduction is complete (see above): a real `VllmConfig` with no speculative decoding leaves the negative intact.
+**Filed as [vllm-project/vllm#44123](https://github.com/vllm-project/vllm/issues/44123)**, framed as a low-severity, integrator-facing config-validation gap (the field is not CLI-settable). The report proposes either adding a `Field(ge=1)` constraint or ungating the `<= 0` check in `_set_max_num_scheduled_tokens`. Empirical reproduction is complete (see above): a real `VllmConfig` with no speculative decoding leaves the negative intact.
 
 ## Out of scope (this audit)
 
