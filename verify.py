@@ -368,6 +368,27 @@ TARGETS: list[Target] = [
         expected="FAILED",
         safety_expected=None,
     ),
+    Target(
+        # Tier-4 flagship, ENCODER compute-budget surface (the third
+        # budget surface of schedule(), after the running-loop and
+        # waiting-queue token budgets). Unlike the token budget's
+        # min(...) clamp, the encoder budget deducts only behind the
+        # can_allocate guard (num_embeds <= budget) and skips otherwise;
+        # preemption restores it. Proves 0 <= encoder_compute_budget <= B
+        # and the accounting identity across guarded deducts + restores.
+        name="scheduler_encoder_budget",
+        entry="scheduler_encoder_budget.py",
+        esbmc_args=("--unwind", "5"),
+        expected="SUCCESSFUL",
+        safety_expected="SUCCESSFUL",
+    ),
+    Target(
+        name="scheduler_encoder_budget_buggy",
+        entry="scheduler_encoder_budget_buggy.py",
+        esbmc_args=("--unwind", "5"),
+        expected="FAILED",
+        safety_expected=None,
+    ),
     # The next four targets use loop reimplementations of upstream's
     # bit-trick functions (see harness headers for the equivalence
     # argument). --unwind 32 covers the longest loop the
