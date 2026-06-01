@@ -204,22 +204,24 @@ TARGETS: list[Target] = [
         safety_expected=None,
     ),
     Target(
-        # Ninth live-bug candidate -- and a correction to AUDIT.md, which
-        # mis-listed kv_cache_memory_bytes under "programmatic-only /
-        # engine-state". It is CLI-wired (`--kv-cache-memory-bytes`,
-        # arg_utils.py:1122), so this is CLI-reachable on the default GPU
-        # path. The field is int|None=None with no gt=/ge=. The GPU
-        # worker's truthiness walrus `if kv_cache_memory_bytes := ...`
-        # (gpu_worker.py:370) treats a negative as "explicitly set" and
-        # returns it verbatim (Finding #8's truthiness class); it flows
-        # through get_num_blocks' `// page_size // num_layers` + the
-        # `max(., 0)` clamp to num_blocks == 0, tripping BlockPool's bare
-        # `assert num_gpu_blocks > 0` (block_pool.py:157) -- the #43842
-        # crash site reached with a zero count.
-        name="kv_cache_memory_bytes_negative_cli_path",
-        entry="kv_cache_memory_bytes_negative_cli_path.py",
-        expected="FAILED",
-        safety_expected=None,
+        # Finding #9: investigated, NOT a live bug (Finding #7 class).
+        # kv_cache_memory_bytes is CLI-wired (`--kv-cache-memory-bytes`,
+        # arg_utils.py:1122) and unconstrained, and gpu_worker.py:370's
+        # truthiness walrus does return a negative verbatim -- but the
+        # admission guard `_check_enough_kv_cache_memory`
+        # (kv_cache_utils.py:697,709) rejects a non-positive / sub-one-
+        # block budget with a clean ValueError in the FIRST loop of
+        # get_kv_cache_configs, before get_num_blocks' clamp or
+        # block_pool.py:157 is ever reached. An earlier version of this
+        # harness asserted `num_blocks > 0` right after the clamp and
+        # FAILED because it omitted that guard. This corrected harness
+        # models the guard as path-pruning and PROVES the guard
+        # establishes BlockPool's `num_gpu_blocks > 0` precondition
+        # (SUCCESSFUL, both phases). See AUDIT.md Finding #9.
+        name="kv_cache_memory_bytes_admission_guard",
+        entry="kv_cache_memory_bytes_admission_guard.py",
+        expected="SUCCESSFUL",
+        safety_expected="SUCCESSFUL",
     ),
     # Tier-3 data-structure targets at concrete K = 4. First
     # harnesses to model a non-trivial structure (doubly-linked

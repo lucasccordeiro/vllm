@@ -191,7 +191,7 @@ Pydantic enforces these at config-construction time. No further audit work neede
 These are set from model config / engine state, not directly by the user, but they're still `int | None` with no validator and could be corrupted by a malformed model HF config:
 
 - `sliding_window: int | None = None` (model config; read from the HF config via `ModelConfig.get_sliding_window()`)
-- ~~`kv_cache_memory_bytes: int | None = None` (engine-state)~~ — **mis-classified here; it is in fact CLI-wired** (`--kv-cache-memory-bytes`, `vllm/engine/arg_utils.py:1122`). Promoted to a CLI-reachable candidate and harnessed as **Finding #9** below.
+- ~~`kv_cache_memory_bytes: int | None = None` (engine-state)~~ — **mis-classified here; it is in fact CLI-wired** (`--kv-cache-memory-bytes`, `vllm/engine/arg_utils.py:1122`). Investigated as **Finding #9** below — **not a live bug**: a non-positive budget is caught by a clean `ValueError` (`_check_enough_kv_cache_memory`) before any crash site.
 - `mamba_page_size_padded: int | None = None` (engine-state; set from `attn_page_size` in `vllm/platforms/interface.py`)
 - `spec_target_max_model_len: int | None = None` (spec-decode config)
 - `max_num_scheduled_tokens: int | None = None` (scheduler-state; defensively replaced with `max_num_batched_tokens` if `0` — see `vllm/v1/core/sched/scheduler.py:104-106`. Negative would skip the fallback and propagate as the token budget.) — harnessed as **Finding #8**.
@@ -739,91 +739,43 @@ Low-to-moderate. Loud failure (assert, not silent corruption), but bare and inte
 
 **Filed as [vllm-project/vllm#44123](https://github.com/vllm-project/vllm/issues/44123)**, framed as a low-severity, integrator-facing config-validation gap (the field is not CLI-settable). The report proposes either adding a `Field(ge=1)` constraint or ungating the `<= 0` check in `_set_max_num_scheduled_tokens`. Empirical reproduction is complete (see above): a real `VllmConfig` with no speculative decoding leaves the negative intact.
 
-## Finding #9 — `--kv-cache-memory-bytes <negative>` → zero block count → bare `AssertionError` (CLI-wired truthiness walrus)
+## Finding #9 — `--kv-cache-memory-bytes <negative>` → investigated, **not a live bug** (caught by `_check_enough_kv_cache_memory`)
 
-**Status**: Harnessed (`kv_cache_memory_bytes_negative_cli_path.py`, Phase 1 FAILED, `vcc=4`); behavioral reproduction of the defect logic in hand (`repro_kv_cache_memory_bytes_negative.py`). Pinned to `4438b6e7d`. **Not yet filed** upstream.
+**Status**: Investigated and **closed without a finding**, in the same class as Finding #7 (`--block-size` non-power-of-2): an existing guard rejects the bad value cleanly. Harness `kv_cache_memory_bytes_admission_guard.py` (Phase 1 + Phase 2 **SUCCESSFUL**, 4 / 17 VCCs) *proves* the admission guard establishes `BlockPool`'s precondition. Pinned to `4438b6e7d`. **Not filed** (no bug to file).
 
-### What makes this one different
+### What was suspected, and why it doesn't hold
 
-This field was originally listed above under *Programmatic-only fields (engine-state)* — that classification is **wrong**: `kv_cache_memory_bytes` is CLI-wired as `--kv-cache-memory-bytes` (`vllm/engine/arg_utils.py:1122`, plumbed at `:1757`). So unlike Finding #8 (genuinely programmatic-only), this is **CLI-reachable on the default GPU path** — `vllm serve --kv-cache-memory-bytes -1` — which makes its reachability comparable to Findings #2–#6, not #8.
+The field *is* CLI-wired (`--kv-cache-memory-bytes`, `vllm/engine/arg_utils.py:1122`, plumbed at `:1757`) — that part of the original note is correct, and corrects the earlier "engine-state / programmatic-only" mis-classification. It is also `int | None = None` with no `Field(gt=/ge=)`, and `gpu_worker.py:370`'s truthiness walrus `if kv_cache_memory_bytes := …` genuinely *does* return a negative verbatim (a negative is truthy). The original hypothesis was that this negative would flow through `get_num_blocks`' `max(num_blocks, 0)` clamp to `num_blocks == 0` and trip `BlockPool.__init__`'s bare `assert num_gpu_blocks > 0` (`block_pool.py:157`) — the #43842 crash site.
 
-The defect composes two already-characterised classes:
-- the **truthiness-propagation** bug of Finding #8 (`if x:` / `if x := ...` instead of `if x is not None:`), and
-- the **non-positive-block-count → bare `AssertionError`** of Finding #4 / [#43842](https://github.com/vllm-project/vllm/issues/43842).
-
-### Trace (against pinned `4438b6e7d`)
-
-1. **Field** (`vllm/config/cache.py:159`): `kv_cache_memory_bytes: int | None = None` — no `Field(gt=/ge=)`. CLI-wired at `vllm/engine/arg_utils.py:1122`. Any int (incl. negative) survives construction.
-
-2. **GPU worker truthiness walrus** (`vllm/v1/worker/gpu_worker.py:370`):
-
-   ```python
-   if kv_cache_memory_bytes := self.cache_config.kv_cache_memory_bytes:
-       ...
-       return kv_cache_memory_bytes        # gpu_worker.py:388
-   ```
-
-   This is a **truthiness** test, not `is not None`. `None`/`0` are falsy and fall through to real memory profiling (safe); a **negative** value is truthy, so it is treated as "explicitly set" and returned verbatim as the available KV-cache memory. (The CPU path is also vulnerable: `cpu_worker.py:182`'s `if explicit_kv_cache_size > available_memory` never fires for a negative, so it too becomes the `kv_cache_size`.)
-
-3. **Blocks-from-memory** (`vllm/v1/core/kv_cache_utils.py:935,951`, `get_num_blocks` — already a verified PoC target):
-
-   ```python
-   num_blocks = int(available_memory // page_size // num_layers)
-   num_blocks = max(num_blocks, 0)         # kv_cache_utils.py:951
-   ```
-
-   The `max(., 0)` clamp converts the negative quotient to `0` — it does **not** rescue the situation.
-
-4. **BlockPool constructor** (`vllm/v1/core/block_pool.py:157`):
-
-   ```python
-   assert isinstance(num_gpu_blocks, int) and num_gpu_blocks > 0
-   ```
-
-   Bare `AssertionError`, no message — exactly the #43842 crash site, now reached with `num_gpu_blocks == 0`.
-
-### ESBMC counterexample
-
-Phase 1, `vcc=4`, FAILED:
+**A full call-chain trace refutes that.** There is an admission guard between `determine_available_memory` and `get_num_blocks` that the original harness omitted:
 
 ```
-Violated property:
-  file kv_cache_memory_bytes_negative_cli_path.py line 96 function main
-  assertion num_blocks > 0
-
-  kv_cache_memory_bytes = -1073741824
-  page_size = 1
-  num_layers = 1073741824
-  available_memory = -1073741824     (truthy -> returned verbatim)
-  num_blocks = -1 -> max(.,0) -> 0
+gpu_worker.py:370   if kv_cache_memory_bytes := self.cache_config.kv_cache_memory_bytes:
+gpu_worker.py:388       return kv_cache_memory_bytes               # negative returned verbatim
+engine/core.py:253  available_gpu_memory = determine_available_memory()   # = [-1]
+engine/core.py:254  self.available_gpu_memory_for_kv_cache = -1    # NO >0 check on this branch
+                    #  (the `assert ... > 0` at core.py:246 guards only the
+                    #   VLLM_ELASTIC_EP_SCALE_UP_LAUNCH branch, not this one)
+engine/core.py:264  get_kv_cache_configs(vllm_config, kv_cache_specs, [-1])
+kv_cache_utils.py:2038  _check_enough_kv_cache_memory(avail_mem=-1, ...)   # FIRST loop
+kv_cache_utils.py:697       if available_memory <= 0:
+kv_cache_utils.py:698           raise ValueError("No available memory for the cache blocks. "
+                                                 "Try increasing `gpu_memory_utilization` ...")  ◀── STOPS HERE
 ```
 
-The witness lives on the explicit branch (negative is truthy), confirming the walrus is what exposes it.
+`_check_enough_kv_cache_memory` runs in the **first** loop of `get_kv_cache_configs`; `get_kv_cache_config_from_groups` (which calls `get_num_blocks` → the `max(., 0)` clamp) is the **second** loop, and `BlockPool` is constructed later still. So a non-positive budget raises a clean `ValueError` at `kv_cache_utils.py:697` long before the clamp or the bare assert. The sub-one-block *positive* case (e.g. `--kv-cache-memory-bytes 100`) is caught by the **second** guard in the same function (`if needed_memory > available_memory: raise ValueError(...)`, `kv_cache_utils.py:709`). **Neither failure mode reaches `block_pool.py:157`.**
 
-### Behavioral reproduction
+### What the corrected harness proves
 
-`torch` is unavailable in the sandbox, so the full `VllmConfig`/`GPUWorker` import-based run (Finding #8's style) is deferred. The defect is pure-Python truthiness + integer logic, and `repro_kv_cache_memory_bytes_negative.py` reproduces it verbatim against the exact upstream expressions (each source line cross-checked against the `4438b6e7d` pin and a local checkout). Observed:
+`kv_cache_memory_bytes_admission_guard.py` models the full chain — the truthiness walrus *and* `_check_enough_kv_cache_memory` (both `raise` statements modelled as path-pruning) — and verifies **SUCCESSFUL** on both phases: under the guard's fall-through (`available_memory > 0` and `available_memory >= needed_memory >= page_size * num_layers`), `get_num_blocks`' result satisfies `num_blocks > 0`. I.e. the admission guard *establishes* `BlockPool`'s precondition; the bare assert is unreachable from this CLI input.
 
-```
-field=None  (profiling path):
-   available=8589934592  num_blocks=16384  -> BlockPool OK
-field=0     (falsy -> profiling path):
-   available=8589934592  num_blocks=16384  -> BlockPool OK
-field=-1    (CLI: --kv-cache-memory-bytes -1):
-   available=-1  num_blocks=0  (negative is truthy -> returned verbatim; clamp(-1,0)=0)
-   -> BlockPool.__init__ assert num_gpu_blocks > 0 FAILS (bare AssertionError, #43842 crash site)
-```
+### Methodology note (why the first pass was wrong)
 
-`None` and `0` correctly take the safe profiling path; only the negative propagates.
+The original `kv_cache_memory_bytes_negative_cli_path.py` asserted `num_blocks > 0` *immediately after the clamp* and reported FAILED — but it had modelled an **incomplete call chain**, omitting the admission guard. The ESBMC counterexample was a true witness *for the model*, not for vLLM. The reachability gap (that `determine_available_memory`'s return actually flows to `get_num_blocks`/`BlockPool` with no intervening validation) was asserted from a partial read rather than traced; tracing it end-to-end closed the gap *against* the finding. Carried forward as a verification-pattern lesson in `RETROSPECTIVE.md`: **harness the full call chain, including every admission/validation guard between the source and the suspected crash site, before treating a FAILED verdict as a live bug.**
 
-### Severity
+### Residual (non-bug) observation
 
-Moderate. **CLI-reachable** (higher than Finding #8), but a loud bare `AssertionError` rather than silent corruption. The `--kv-cache-memory-bytes` knob is documented as an advanced/manual-control option, so the bad input is operator-supplied rather than adversarial. Strongest framing: a user fat-fingering a negative byte budget — or computing one that underflows — gets an internal traceback at `block_pool.py:157` instead of a clean `ValueError("--kv-cache-memory-bytes must be positive")`. A sub-one-block *positive* value (e.g. `--kv-cache-memory-bytes 100`) is the same bug: `100 // page_size // num_layers == 0`.
-
-### Proposed fix (either)
-
-- Add a field constraint: `kv_cache_memory_bytes: int | None = Field(default=None, gt=0)`; **or**
-- Change the walrus to an explicit `is not None` test in `determine_available_memory` and validate `> 0` there (and mirror in `cpu_worker.py`).
+The truthiness walrus does treat a negative as "explicitly set," and the resulting `ValueError` message points at `gpu_memory_utilization` rather than `--kv-cache-memory-bytes`, so it is mildly misleading for someone who fat-fingered a negative byte budget. A `Field(default=None, gt=0)` constraint (or an `is not None` walrus rewrite) would give a more direct message — a minor UX polish, not a validation bypass or crash. Not worth an upstream issue on its own.
 
 ## Out of scope (this audit)
 
