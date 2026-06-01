@@ -7,16 +7,16 @@ integer / index arithmetic, modelled on the
 
 ## Status
 
-**30 verification targets** across Tiers 1–4 — pure-int helpers
+**31 verification targets** across Tiers 1–4 — pure-int helpers
 (`cdiv`, `round_up/down`, `next_power_of_2`, `largest_power_of_2_divisor`),
 CLI/config-validation paths, KV-cache data structures
 (`FreeKVCacheBlockQueue.popleft_n/append_n`, `BlockPool.get_new_blocks`,
 `KVCacheManager.allocate_slots`), and the first scheduler invariant
 (`_has_repeating_pattern` negative-index safety). End-to-end
-`make verify` (30 entries × two phases) completes in ~4 min with 0
+`make verify` (31 entries × two phases) completes in ~4 min with 0
 failures.
 
-**Seven live, CLI-reachable findings** to date (full enumeration in
+**Eight live, CLI-reachable findings** to date (full enumeration in
 [`AUDIT.md`](./AUDIT.md)): three fixed upstream by PR #43794
 (`--block-size 0`, `--hash-block-size 0`, `--max-model-len 0`), a
 fourth (`--hash-block-size -k`) incidentally closed by the same
@@ -25,7 +25,13 @@ fourth (`--hash-block-size -k`) incidentally closed by the same
 `--num-gpu-blocks-override 0`; and
 [#43985](https://github.com/vllm-project/vllm/issues/43985), bundling the
 two silent-acceptance defects `--max-logprobs`/`--long-prefill-token-threshold`
-negatives).
+negatives), and an eighth harnessed but not-yet-filed
+(`--kv-cache-memory-bytes <negative>` → bare `AssertionError` at
+`block_pool.py:157`; AUDIT Finding #9, which also corrects an earlier
+mis-classification of the field as engine-state). A ninth finding
+(`max_num_scheduled_tokens` negative,
+[#44123](https://github.com/vllm-project/vllm/issues/44123)) is
+programmatic-only, not CLI-reachable.
 Three ESBMC frontend issues were filed along the way
 ([#4926](https://github.com/esbmc/esbmc/issues/4926),
 [#4909](https://github.com/esbmc/esbmc/issues/4909),
