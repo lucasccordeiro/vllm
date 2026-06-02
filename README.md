@@ -7,13 +7,13 @@ integer / index arithmetic, modelled on the
 
 ## Status
 
-**30 verification targets** across Tiers 1–4 — pure-int helpers
+**31 verification targets** across Tiers 1–4 — pure-int helpers
 (`cdiv`, `round_up/down`, `next_power_of_2`, `largest_power_of_2_divisor`),
 CLI/config-validation paths, KV-cache data structures
 (`FreeKVCacheBlockQueue.popleft_n/append_n`, `BlockPool.get_new_blocks`,
 `KVCacheManager.allocate_slots`), and the first scheduler invariant
 (`_has_repeating_pattern` negative-index safety). End-to-end
-`make verify` (30 entries × two phases) completes in ~4 min with 0
+`make verify` (31 entries × two phases) completes in ~4 min with 0
 failures.
 
 **Seven live, CLI-reachable findings** to date (full enumeration in
@@ -25,7 +25,13 @@ fourth (`--hash-block-size -k`) incidentally closed by the same
 `--num-gpu-blocks-override 0`; and
 [#43985](https://github.com/vllm-project/vllm/issues/43985), bundling the
 two silent-acceptance defects `--max-logprobs`/`--long-prefill-token-threshold`
-negatives).
+negatives). An eighth finding (`max_num_scheduled_tokens` negative,
+[#44123](https://github.com/vllm-project/vllm/issues/44123)) is
+programmatic-only, not CLI-reachable. Two further candidates were
+investigated and closed as **not live bugs** — the value is rejected
+cleanly by an existing guard: `--block-size N` non-power-of-2 (AUDIT
+Finding #7) and `--kv-cache-memory-bytes <negative>` (AUDIT Finding #9,
+caught by `_check_enough_kv_cache_memory` before any crash site).
 Three ESBMC frontend issues were filed along the way
 ([#4926](https://github.com/esbmc/esbmc/issues/4926),
 [#4909](https://github.com/esbmc/esbmc/issues/4909),

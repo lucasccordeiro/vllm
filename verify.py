@@ -203,6 +203,26 @@ TARGETS: list[Target] = [
         expected="FAILED",
         safety_expected=None,
     ),
+    Target(
+        # Finding #9: investigated, NOT a live bug (Finding #7 class).
+        # kv_cache_memory_bytes is CLI-wired (`--kv-cache-memory-bytes`,
+        # arg_utils.py:1122) and unconstrained, and gpu_worker.py:370's
+        # truthiness walrus does return a negative verbatim -- but the
+        # admission guard `_check_enough_kv_cache_memory`
+        # (kv_cache_utils.py:697,709) rejects a non-positive / sub-one-
+        # block budget with a clean ValueError in the FIRST loop of
+        # get_kv_cache_configs, before get_num_blocks' clamp or
+        # block_pool.py:157 is ever reached. An earlier version of this
+        # harness asserted `num_blocks > 0` right after the clamp and
+        # FAILED because it omitted that guard. This corrected harness
+        # models the guard as path-pruning and PROVES the guard
+        # establishes BlockPool's `num_gpu_blocks > 0` precondition
+        # (SUCCESSFUL, both phases). See AUDIT.md Finding #9.
+        name="kv_cache_memory_bytes_admission_guard",
+        entry="kv_cache_memory_bytes_admission_guard.py",
+        expected="SUCCESSFUL",
+        safety_expected="SUCCESSFUL",
+    ),
     # Tier-3 data-structure targets at concrete K = 4. First
     # harnesses to model a non-trivial structure (doubly-linked
     # free-list with fake head/tail sentinels). Represent the
