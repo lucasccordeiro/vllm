@@ -653,7 +653,7 @@ Not filed upstream. No defect to fix; the chain is sound.
 
 ## Finding #8 — `max_num_scheduled_tokens` negative → bare `AssertionError` in `schedule()` (programmatic, gated guard)
 
-**Filed**: [vllm-project/vllm#44123](https://github.com/vllm-project/vllm/issues/44123) (open). Harnessed (`max_num_scheduled_tokens_negative.py`, Phase 1 FAILED, `vcc=1`) and empirically reproduced (see below) against pinned `4438b6e7d`. This is the first finding from the *programmatic-only* field list (above), not the CLI surface; its reachability is materially weaker than Findings #2–#6, so it was filed as an explicitly lower-severity, integrator-facing report.
+**Status**: **Fixed upstream** by [vllm-project/vllm#44207](https://github.com/vllm-project/vllm/pull/44207) (merged); issue [#44123](https://github.com/vllm-project/vllm/issues/44123) closed. Harnessed (`max_num_scheduled_tokens_negative.py`, Phase 1 FAILED, `vcc=1`) and empirically reproduced (see below) against pinned `4438b6e7d`. This is the first finding from the *programmatic-only* field list (above), not the CLI surface; its reachability is materially weaker than Findings #2–#6, so it was filed as an explicitly lower-severity, integrator-facing report.
 
 ### What makes this one different
 
@@ -750,6 +750,15 @@ Low-to-moderate. Loud failure (assert, not silent corruption), but bare and inte
 ### Filing decision
 
 **Filed as [vllm-project/vllm#44123](https://github.com/vllm-project/vllm/issues/44123)**, framed as a low-severity, integrator-facing config-validation gap (the field is not CLI-settable). The report proposes either adding a `Field(ge=1)` constraint or ungating the `<= 0` check in `_set_max_num_scheduled_tokens`. Empirical reproduction is complete (see above): a real `VllmConfig` with no speculative decoding leaves the negative intact.
+
+### Resolution
+
+**Fixed upstream by [vllm-project/vllm#44207](https://github.com/vllm-project/vllm/pull/44207) (merged)**; issue #44123 closed. The maintainers took the field-constraint route plus a defence-in-depth tightening of the fallback:
+
+1. **`vllm/config/scheduler.py`** — `max_num_scheduled_tokens` gains `Field(default=None, ge=0)`, so a negative is now rejected with a Pydantic `ValidationError` at model construction on *every* path, not only under speculative decoding. (Note the merged bound is `ge=0`, not the `ge=1` the report suggested — `0` remains accepted and is handled by the fallback below.)
+2. **`vllm/v1/core/sched/scheduler.py:104`** — the truthiness fallback becomes an explicit `is not None` check, so `0` is handled reliably rather than relying on falsy-ness.
+
+The harness `max_num_scheduled_tokens_negative.py` is retained as a regression witness: re-run against post-#44207 source, the negative input is now caught at config construction instead of propagating to the bare `assert token_budget >= 0`.
 
 ## Finding #9 — `--kv-cache-memory-bytes <negative>` → investigated, **not a live bug** (caught by `_check_enough_kv_cache_memory`)
 

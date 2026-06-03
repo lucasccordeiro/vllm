@@ -27,7 +27,10 @@ fourth (`--hash-block-size -k`) incidentally closed by the same
 two silent-acceptance defects `--max-logprobs`/`--long-prefill-token-threshold`
 negatives). An eighth finding (`max_num_scheduled_tokens` negative,
 [#44123](https://github.com/vllm-project/vllm/issues/44123)) is
-programmatic-only, not CLI-reachable. Two further candidates were
+programmatic-only, not CLI-reachable, and was **fixed upstream** by
+[#44207](https://github.com/vllm-project/vllm/pull/44207) (merged) —
+a `Field(default=None, ge=0)` constraint plus an explicit `is not None`
+fallback in the scheduler. Two further candidates were
 investigated and closed as **not live bugs** — the value is rejected
 cleanly by an existing guard: `--block-size N` non-power-of-2 (AUDIT
 Finding #7) and `--kv-cache-memory-bytes <negative>` (AUDIT Finding #9,
