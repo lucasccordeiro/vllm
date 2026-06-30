@@ -216,8 +216,8 @@ dedicated finding sections below (referenced here only by outcome):
 
 1. ~~**`--num-gpu-blocks-override 0` / negative**~~ — ✅ filed as [vllm-project/vllm#43842](https://github.com/vllm-project/vllm/issues/43842) (open). See **Finding #4**.
 2. ~~**`--max-model-len 0`**~~ — ✅ filed as [vllm-project/vllm#43532](https://github.com/vllm-project/vllm/issues/43532), fixed upstream by [#43794](https://github.com/vllm-project/vllm/pull/43794). See **Finding #3**.
-3. ~~**`--max-logprobs` negative**~~ — ✅ silent-config-acceptance defect; filed (bundled with Finding #6) as [vllm-project/vllm#43985](https://github.com/vllm-project/vllm/issues/43985). See **Finding #5**.
-4. ~~**`--long-prefill-token-threshold` negative**~~ — ✅ silent-config-acceptance defect; filed as [vllm-project/vllm#43985](https://github.com/vllm-project/vllm/issues/43985). See **Finding #6**.
+3. ~~**`--max-logprobs` negative**~~ — ✅ silent-config-acceptance defect; filed (bundled with Finding #6) as [vllm-project/vllm#43985](https://github.com/vllm-project/vllm/issues/43985), **fixed upstream** by [#44070](https://github.com/vllm-project/vllm/pull/44070). See **Finding #5**.
+4. ~~**`--long-prefill-token-threshold` negative**~~ — ✅ silent-config-acceptance defect; filed as [vllm-project/vllm#43985](https://github.com/vllm-project/vllm/issues/43985), **fixed upstream** by [#44070](https://github.com/vllm-project/vllm/pull/44070). See **Finding #6**.
 
 ## Finding #3 — `--max-model-len 0` silent negative-num_new_tokens propagation
 
@@ -402,7 +402,7 @@ Replace the bare assertion with an early validator on `CacheConfig`. Two natural
 
 ## Finding #5 — `--max-logprobs <negative>` silent-config-acceptance
 
-**Filing decision**: filed upstream (2026-05-29) as [vllm-project/vllm#43985](https://github.com/vllm-project/vllm/issues/43985), bundled with Finding #6 (same field-level admission shape, same one-line `field_validator` fix). Severity is cosmetic (see *Severity* below), which is why it was bundled into one low-severity report rather than a one-off issue per field.
+**Status**: **Fixed upstream** by [vllm-project/vllm#44070](https://github.com/vllm-project/vllm/pull/44070) (merged 2026-06-30); issue [#43985](https://github.com/vllm-project/vllm/issues/43985) closed. Filed upstream (2026-05-29) as [#43985](https://github.com/vllm-project/vllm/issues/43985), bundled with Finding #6 (same field-level admission shape, same one-line fix). Severity is cosmetic (see *Severity* below), which is why it was bundled into one low-severity report rather than a one-off issue per field.
 
 ### Trace
 
@@ -501,9 +501,17 @@ def _check_max_logprobs(cls, v):
     )
 ```
 
+### Resolution
+
+**Fixed upstream by [vllm-project/vllm#44070](https://github.com/vllm-project/vllm/pull/44070) (merged 2026-06-30)**; issue #43985 closed. The maintainers took the field-constraint route, but as a one-line Pydantic `Field` constraint rather than the `field_validator` decorator the report proposed (a reviewer asked for the simpler `Field(ge=...)` form):
+
+- **`vllm/config/model.py`** — `max_logprobs` gains `Field(ge=-1)`, admitting only `-1` (the "auto = vocab size" sentinel) or a non-negative integer. Any other negative is now rejected with a Pydantic `ValidationError` at config construction, before `sampling_params.py:680` ever sees it — closing both the confusing-`"max allowed: -5"` path and the logprob-free silent no-op.
+
+The harness `max_logprobs_negative_cli_path.py` is retained as a regression witness: re-run against post-#44070 source, the `-2` input is now caught at config construction instead of surviving to the validator.
+
 ## Finding #6 — `--long-prefill-token-threshold <negative>` silent-config-acceptance
 
-**Filing decision**: filed upstream (2026-05-29) as [vllm-project/vllm#43985](https://github.com/vllm-project/vllm/issues/43985), bundled with Finding #5 in one low-severity config-validation report (both share the field-level admission shape and the one-line `field_validator` fix). Severity is cosmetic (silent no-op rather than crash or silent corruption).
+**Status**: **Fixed upstream** by [vllm-project/vllm#44070](https://github.com/vllm-project/vllm/pull/44070) (merged 2026-06-30); issue [#43985](https://github.com/vllm-project/vllm/issues/43985) closed. Filed upstream (2026-05-29) as [#43985](https://github.com/vllm-project/vllm/issues/43985), bundled with Finding #5 in one low-severity config-validation report (both share the field-level admission shape and the one-line fix). Severity is cosmetic (silent no-op rather than crash or silent corruption).
 
 ### Trace
 
@@ -593,6 +601,14 @@ def _check_long_prefill_token_threshold(cls, v):
         )
     return v
 ```
+
+### Resolution
+
+**Fixed upstream by [vllm-project/vllm#44070](https://github.com/vllm-project/vllm/pull/44070) (merged 2026-06-30)**; issue #43985 closed. As with Finding #5, the maintainers landed the simpler `Field` constraint rather than the proposed `field_validator`:
+
+- **`vllm/config/scheduler.py`** — `long_prefill_token_threshold` gains `Field(ge=0)` (`0 = off, > 0 = clamp`). Any negative is now rejected with a Pydantic `ValidationError` at config construction, so the `0 < threshold < num_new_tokens` scheduler guard at `scheduler.py:390` can no longer silently no-op on a user-set negative cap.
+
+The harness `long_prefill_token_threshold_negative_cli_path.py` is retained as a regression witness: re-run against post-#44070 source, the `-1` input is now caught at config construction instead of reaching the scheduler clamp.
 
 ## Finding #7 — `--block-size N` for non-power-of-2 `N`: investigated, no live bug
 

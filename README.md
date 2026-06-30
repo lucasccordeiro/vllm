@@ -20,12 +20,14 @@ failures.
 [`AUDIT.md`](./AUDIT.md)): three fixed upstream by PR #43794
 (`--block-size 0`, `--hash-block-size 0`, `--max-model-len 0`), a
 fourth (`--hash-block-size -k`) incidentally closed by the same
-`gt=0` constraint, two filed and open
+`gt=0` constraint, one filed and open
 ([#43842](https://github.com/vllm-project/vllm/issues/43842)
-`--num-gpu-blocks-override 0`; and
-[#43985](https://github.com/vllm-project/vllm/issues/43985), bundling the
-two silent-acceptance defects `--max-logprobs`/`--long-prefill-token-threshold`
-negatives). An eighth finding (`max_num_scheduled_tokens` negative,
+`--num-gpu-blocks-override 0`), and the two silent-acceptance defects
+`--max-logprobs`/`--long-prefill-token-threshold` negatives (bundled in
+[#43985](https://github.com/vllm-project/vllm/issues/43985)) **fixed
+upstream** by [#44070](https://github.com/vllm-project/vllm/pull/44070)
+(merged) — a `Field(ge=-1)` / `Field(ge=0)` constraint on the two
+fields. An eighth finding (`max_num_scheduled_tokens` negative,
 [#44123](https://github.com/vllm-project/vllm/issues/44123)) is
 programmatic-only, not CLI-reachable, and was **fixed upstream** by
 [#44207](https://github.com/vllm-project/vllm/pull/44207) (merged) —
