@@ -6,6 +6,31 @@ The audit fires the methodology that produced the first live finding ([vllm-proj
 
 Pinned upstream: `vllm-project/vllm @ 4438b6e7d`.
 
+## Upstream status (re-checked 2026-08-27 against `main @ 4a6a3272`)
+
+Six issues were filed upstream from this audit. **Five are fixed and closed; one
+— [#43842](https://github.com/vllm-project/vllm/issues/43842) (Finding #4) — is
+still open**, and was auto-labelled `stale` on 2026-08-27. Every fix below was
+re-read in upstream source at `4a6a3272`, not inferred from the issue state.
+
+| Issue | Finding | Upstream state | Fix, as present on `4a6a3272` |
+|---|---|---|---|
+| [#43496](https://github.com/vllm-project/vllm/issues/43496) | #1 `--block-size 0` | **Closed** (completed) | `block_size: int = Field(default=None, gt=0)` — `vllm/config/cache.py:81` |
+| [#43521](https://github.com/vllm-project/vllm/issues/43521) | #2 `--hash-block-size 0` | **Closed** (completed) | `Field(default=None, gt=0)`, carried through the rename to `prefix_match_unit` — `vllm/config/cache.py:99` |
+| [#43532](https://github.com/vllm-project/vllm/issues/43532) | #3 `--max-model-len 0` | **Closed** (completed) | `max_model_len < 1` raises `ValueError` in `validate_model_config_after` — `vllm/config/model.py:935` |
+| [#43842](https://github.com/vllm-project/vllm/issues/43842) | #4 `--num-gpu-blocks-override 0` | **OPEN**, labelled `stale` | **None.** Field is still `int \| None = None` (`vllm/config/cache.py:132`); the bare `assert isinstance(num_gpu_blocks, int) and num_gpu_blocks > 0` is still there, now at `vllm/v1/core/block_pool.py:170` |
+| [#43985](https://github.com/vllm-project/vllm/issues/43985) | #5 + #6 negatives | **Closed** (completed) | `max_logprobs: int = Field(default=20, ge=-1)` (`vllm/config/model.py:250`); `long_prefill_token_threshold: int = Field(default=0, ge=0)` (`vllm/config/scheduler.py:70`) |
+| [#44123](https://github.com/vllm-project/vllm/issues/44123) | #8 `max_num_scheduled_tokens` | **Closed** (completed) | `Field(default=None, ge=0)` (`vllm/config/scheduler.py:56`) + explicit `is not None` fallback (`vllm/v1/core/sched/scheduler.py:120-124`) |
+
+Findings #7 and #9 were closed without a filing (existing guards reject the bad
+value cleanly — no defect to report).
+
+**Rename to track.** Upstream renamed `CacheConfig.hash_block_size` to
+`prefix_match_unit`, and the CLI flag `--hash-block-size` to
+`--prefix-match-unit` (`vllm/engine/arg_utils.py:1269`). #43794's `gt=0`
+constraint moved with the field, so Finding #2 stays fixed; the harnesses keep
+the pinned-commit spelling.
+
 ## Scope
 
 **In scope.** Every `SkipValidation[int]` (or `SkipValidation[int] | None`) field declared in `vllm/config/*.py`, plus its downstream reach into integer-arithmetic code paths (`//`, `%`, `cdiv`, comparisons used as guards).
@@ -32,7 +57,7 @@ Two `SkipValidation[int]` fields total. The rest are non-int and out of scope pe
 | # | Field | Severity | Status |
 |---|---|---|---|
 | 1 | `CacheConfig.block_size` | **Live, CLI-reachable, fixed upstream** (filed: [vllm-project/vllm#43496](https://github.com/vllm-project/vllm/issues/43496); fixed: [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794), merged 2026-05-27) | Shipped as the `block_size_zero_cli_path` target. Closed by #43794, which replaces `SkipValidation[int]` with `Field(default=None, gt=0)`. |
-| 2 | `CacheConfig.hash_block_size` | **Live, CLI-reachable, reproduced, filed, fixed upstream** | Filed as [vllm-project/vllm#43521](https://github.com/vllm-project/vllm/issues/43521); fixed upstream by [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794) (merged 2026-05-27) with the same `Field(default=None, gt=0)` shape applied to `hash_block_size: int \| None`. The `gt=0` constraint also rejects negative values, incidentally closing the adjacent `--hash-block-size -k` propagation finding. Harness `hash_block_size_zero_cli_path.py` produces the CWE-369 counterexample; an empirical sandbox reproducer hits the exact crash at `vllm/v1/core/kv_cache_utils.py:628`. |
+| 2 | `CacheConfig.hash_block_size` | **Live, CLI-reachable, reproduced, filed, fixed upstream** | Filed as [vllm-project/vllm#43521](https://github.com/vllm-project/vllm/issues/43521); fixed upstream by [vllm-project/vllm#43794](https://github.com/vllm-project/vllm/pull/43794) (merged 2026-05-27) with the same `Field(default=None, gt=0)` shape applied to `hash_block_size: int \| None`. The `gt=0` constraint also rejects negative values, incidentally closing the adjacent `--hash-block-size -k` propagation finding. Harness `hash_block_size_zero_cli_path.py` produces the CWE-369 counterexample; an empirical sandbox reproducer hits the exact crash at `vllm/v1/core/kv_cache_utils.py:628`. Upstream has since renamed the field to `prefix_match_unit`; the `gt=0` constraint moved with it (re-checked 2026-08-27). |
 
 ## Finding #1 — `CacheConfig.block_size`
 
@@ -214,7 +239,7 @@ All four candidates have since been harnessed and confirmed live; the
 ESBMC counterexamples, empirical chains, and fix status are in their
 dedicated finding sections below (referenced here only by outcome):
 
-1. ~~**`--num-gpu-blocks-override 0` / negative**~~ — ✅ filed as [vllm-project/vllm#43842](https://github.com/vllm-project/vllm/issues/43842) (open). See **Finding #4**.
+1. ~~**`--num-gpu-blocks-override 0` / negative**~~ — ✅ filed as [vllm-project/vllm#43842](https://github.com/vllm-project/vllm/issues/43842) (**still open**; `stale`-labelled 2026-08-27, unfixed on `main @ 4a6a3272`). See **Finding #4**.
 2. ~~**`--max-model-len 0`**~~ — ✅ filed as [vllm-project/vllm#43532](https://github.com/vllm-project/vllm/issues/43532), fixed upstream by [#43794](https://github.com/vllm-project/vllm/pull/43794). See **Finding #3**.
 3. ~~**`--max-logprobs` negative**~~ — ✅ silent-config-acceptance defect; filed (bundled with Finding #6) as [vllm-project/vllm#43985](https://github.com/vllm-project/vllm/issues/43985), **fixed upstream** by [#44070](https://github.com/vllm-project/vllm/pull/44070). See **Finding #5**.
 4. ~~**`--long-prefill-token-threshold` negative**~~ — ✅ silent-config-acceptance defect; filed as [vllm-project/vllm#43985](https://github.com/vllm-project/vllm/issues/43985), **fixed upstream** by [#44070](https://github.com/vllm-project/vllm/pull/44070). See **Finding #6**.
@@ -308,7 +333,9 @@ This runs after `_get_and_verify_max_len` has resolved the `None` / `-1` sentine
 
 ## Finding #4 — `--num-gpu-blocks-override 0` / negative → bare `AssertionError` in `BlockPool.__init__`
 
-**Filed**: [vllm-project/vllm#43842](https://github.com/vllm-project/vllm/issues/43842) (open, labelled `bug`). Confirmed live against `origin/main` at commit `6cc8577` (2026-05-28); no commit between the #43794 merge and `6cc8577` touched `cache.py`, `kv_cache_utils.py`, or `block_pool.py`, so the empirical reproducer below still holds.
+**Filed**: [vllm-project/vllm#43842](https://github.com/vllm-project/vllm/issues/43842) — **the one finding of this audit still unfixed upstream**. The issue was auto-labelled `stale` on 2026-08-27 (the `bug` label was dropped); the bot closes it after a further 30 days without activity. Confirmed live against `origin/main` at commit `6cc8577` (2026-05-28) and **re-confirmed unfixed against `main @ 4a6a3272` (2026-08-27)**: `num_gpu_blocks_override` is still `int | None = None` with no field constraint (`vllm/config/cache.py:132`), `may_override_num_blocks` is unchanged (`vllm/v1/core/kv_cache_utils.py:994-1001`), and the bare assertion is intact — now at `vllm/v1/core/block_pool.py:170` (`:157` at the pinned commit). The empirical reproducer below still holds.
+
+**Fix attempts.** Three community PRs propose exactly the field-level `Field(gt=0)` shape recommended below; none has received a review. [#43845](https://github.com/vllm-project/vllm/pull/43845) (2026-05-28) was closed 14 minutes after opening, by its own author, with no stated reason. [#44233](https://github.com/vllm-project/vllm/pull/44233) and [#44241](https://github.com/vllm-project/vllm/pull/44241) (both 2026-06-01, duplicates of each other, both touching `vllm/config/cache.py` + a `tests/config/test_cache_config.py` case) are still open: zero reviews, GitHub reports both mergeable, and both carry a failing `pre-run-check` CI job.
 
 ### Trace
 
