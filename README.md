@@ -1,80 +1,77 @@
 # vLLM ESBMC-Python verification PoC
 
-A proof-of-concept applying [ESBMC](https://github.com/esbmc/esbmc)'s
-Python frontend to [vLLM](https://github.com/vllm-project/vllm)'s
-integer / index arithmetic, modelled on the
+A proof-of-concept applying [ESBMC](https://github.com/esbmc/esbmc) —
+a bounded model checker that either proves no input up to a given
+bound violates a property, or returns a concrete counterexample — to
+[vLLM](https://github.com/vllm-project/vllm)'s config-validation chain
+and KV-cache integer arithmetic. Modelled on the
 [AWS-Neuron PoC](https://github.com/lucasccordeiro/AWS-Neuron).
 
-## Status
+**Why it matters if you run vLLM in production:** a malformed CLI
+flag (`--block-size 0`, a negative `--max-logprobs`, …) can pass
+argparse and every config validator, then surface much later as a
+bare `AssertionError`, a `ZeroDivisionError`, or a flag that silently
+does nothing — usually at engine init, on the machine that's supposed
+to be serving traffic. Instead of testing individual flag values,
+ESBMC symbolically covers every value a field can take across the
+CLI-to-arithmetic call chain and produces a witness the moment one
+breaks.
 
-**31 verification targets** across Tiers 1–4 — pure-int helpers
-(`cdiv`, `round_up/down`, `next_power_of_2`, `largest_power_of_2_divisor`),
-CLI/config-validation paths, KV-cache data structures
-(`FreeKVCacheBlockQueue.popleft_n/append_n`, `BlockPool.get_new_blocks`,
-`KVCacheManager.allocate_slots`), and the first scheduler invariant
-(`_has_repeating_pattern` negative-index safety). End-to-end
-`make verify` (31 entries × two phases) completes in ~4 min with 0
-failures.
+## Results at a glance
 
-**Seven live, CLI-reachable findings** to date (full enumeration in
-[`AUDIT.md`](./AUDIT.md)): three fixed upstream by PR #43794
-(`--block-size 0`, `--hash-block-size 0`, `--max-model-len 0`), a
-fourth (`--hash-block-size -k`) incidentally closed by the same
-`gt=0` constraint, one **still open**
-([#43842](https://github.com/vllm-project/vllm/issues/43842)
-`--num-gpu-blocks-override 0` — unfixed on upstream `main` as of
-2026-08-27, auto-labelled `stale`, with two unreviewed community PRs
-[#44233](https://github.com/vllm-project/vllm/pull/44233) /
-[#44241](https://github.com/vllm-project/vllm/pull/44241) proposing the
-`gt=0` fix), and the two silent-acceptance defects
-`--max-logprobs`/`--long-prefill-token-threshold` negatives (bundled in
-[#43985](https://github.com/vllm-project/vllm/issues/43985)) **fixed
-upstream** by [#44070](https://github.com/vllm-project/vllm/pull/44070)
-(merged) — a `Field(ge=-1)` / `Field(ge=0)` constraint on the two
-fields. An eighth finding (`max_num_scheduled_tokens` negative,
-[#44123](https://github.com/vllm-project/vllm/issues/44123)) is
-programmatic-only, not CLI-reachable, and was **fixed upstream** by
-[#44207](https://github.com/vllm-project/vllm/pull/44207) (merged) —
-a `Field(default=None, ge=0)` constraint plus an explicit `is not None`
-fallback in the scheduler. Two further candidates were
-investigated and closed as **not live bugs** — the value is rejected
-cleanly by an existing guard: `--block-size N` non-power-of-2 (AUDIT
-Finding #7) and `--kv-cache-memory-bytes <negative>` (AUDIT Finding #9,
-caught by `_check_enough_kv_cache_memory` before any crash site).
-Three ESBMC frontend issues were filed along the way
+**31 verification targets**, **8 live findings**, **5 of 6 filed
+issues fixed upstream** (re-checked 2026-08-27 against `vllm-project/vllm
+@ 4a6a3272` by reading the fix in source, not the issue tracker).
+`make verify` runs the full suite (31 targets × two phases) in ~4 min
+with 0 unexpected failures.
+
+| Flag / field | Failure mode | Issue | Status |
+|---|---|---|---|
+| `--block-size 0` | `ZeroDivisionError` at engine init | [#43496](https://github.com/vllm-project/vllm/issues/43496) | ✅ Fixed — [#43794](https://github.com/vllm-project/vllm/pull/43794) |
+| `--hash-block-size 0` | crash in `resolve_kv_cache_block_size` | [#43521](https://github.com/vllm-project/vllm/issues/43521) | ✅ Fixed — [#43794](https://github.com/vllm-project/vllm/pull/43794) |
+| `--hash-block-size -k` | infinite loop in `request_block_hasher` | *(incidental, same PR)* | ✅ Fixed — [#43794](https://github.com/vllm-project/vllm/pull/43794) |
+| `--max-model-len 0` | negative token count silently propagates | [#43532](https://github.com/vllm-project/vllm/issues/43532) | ✅ Fixed — [#43794](https://github.com/vllm-project/vllm/pull/43794) |
+| `--num-gpu-blocks-override 0` | bare `AssertionError` at engine init | [#43842](https://github.com/vllm-project/vllm/issues/43842) | 🟡 **Open** — stale-labelled 2026-08-27, two unreviewed fix PRs |
+| `--max-logprobs <negative>` | silently accepted, confusing error later | [#43985](https://github.com/vllm-project/vllm/issues/43985) | ✅ Fixed — [#44070](https://github.com/vllm-project/vllm/pull/44070) |
+| `--long-prefill-token-threshold <negative>` | silently accepted, flag has no effect | [#43985](https://github.com/vllm-project/vllm/issues/43985) | ✅ Fixed — [#44070](https://github.com/vllm-project/vllm/pull/44070) |
+| `max_num_scheduled_tokens < 0` (programmatic-only, not CLI) | bare `AssertionError` in `schedule()` | [#44123](https://github.com/vllm-project/vllm/issues/44123) | ✅ Fixed — [#44207](https://github.com/vllm-project/vllm/pull/44207) |
+
+Two further candidates were investigated and closed **without a
+finding** — an existing guard already rejects the bad value cleanly
+before it can do damage: `--block-size N` non-power-of-2 (AUDIT.md
+Finding #7) and `--kv-cache-memory-bytes <negative>` (AUDIT.md
+Finding #9, caught by `_check_enough_kv_cache_memory`). Three ESBMC
+frontend issues were filed along the way
 ([#4926](https://github.com/esbmc/esbmc/issues/4926),
 [#4909](https://github.com/esbmc/esbmc/issues/4909),
 [#4756](https://github.com/esbmc/esbmc/issues/4756)).
 
-Upstream status re-checked 2026-08-27 against `vllm-project/vllm @
-4a6a3272`: five of the six filed vLLM issues are fixed and closed, each
-fix re-read in upstream source rather than inferred from the issue
-state; only #43842 remains. Per-issue table in [`AUDIT.md`](./AUDIT.md)
-*Upstream status*.
+Full per-finding writeups, traces, and the per-issue upstream-status
+table are in [`AUDIT.md`](./AUDIT.md); scope, soundness caveats, and
+the target roadmap are in [`REPORT.md`](./REPORT.md).
 
-**Worked example — `--block-size 0`
-([#43496](https://github.com/vllm-project/vllm/issues/43496)).**
-`vllm serve <model> --block-size 0` was accepted by argparse,
-passed through every config validator, and crashed engine init with
-`ZeroDivisionError` inside `cdiv(max_model_len, self.block_size)`
-at `vllm/v1/kv_cache_interface.py:218`. The
-`harness/block_size_zero_cli_path.py` ESBMC counterexample is the
-bug witness; it was empirically reproduced by installing vLLM from
-source and triggering the exact crash. The landed fix
+## Worked example — `--block-size 0`
+
+`vllm serve <model> --block-size 0` was accepted by argparse, passed
+through every config validator, and crashed engine init with
+`ZeroDivisionError` inside `cdiv(max_model_len, self.block_size)` at
+`vllm/v1/kv_cache_interface.py:218`. The
+[`harness/block_size_zero_cli_path.py`](./harness/block_size_zero_cli_path.py)
+ESBMC counterexample is the bug witness; it was empirically
+reproduced by installing vLLM from source and triggering the exact
+crash. The fix that landed
 ([#43794](https://github.com/vllm-project/vllm/pull/43794)) replaces
 `SkipValidation[int]` with the one-line `Field(default=None, gt=0)`
-shape proposed in the issue, and the harness is kept as a regression
-witness — re-running it against post-#43794 source now exercises the
-validator instead of the crash site. See [`REPORT.md` §7](./REPORT.md).
+shape proposed in the issue — [#43496](https://github.com/vllm-project/vllm/issues/43496).
+The harness is kept as a regression witness: re-run against
+post-#43794 source, it now exercises the validator instead of the
+crash site. See [`REPORT.md` §7](./REPORT.md).
 
 **First latent-precondition finding (defensive, not a live bug).**
 `vllm.v1.core.kv_cache_utils.get_num_blocks` divides by `page_size`
-and `num_layers` without guarding either; reachability analysis
-shows the failure is not reachable from any normal CLI invocation.
-See [`REPORT.md` §5](./REPORT.md).
-
-See [`REPORT.md`](./REPORT.md) for the full scope, soundness
-caveats, and target roadmap.
+and `num_layers` without guarding either; reachability analysis shows
+the failure is not reachable from any normal CLI invocation. See
+[`REPORT.md` §5](./REPORT.md).
 
 ## Quickstart
 
