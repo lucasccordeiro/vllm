@@ -37,7 +37,7 @@ with 0 unexpected failures.
 | `max_num_scheduled_tokens < 0` (programmatic-only, not CLI) | bare `AssertionError` in `schedule()` | [#44123](https://github.com/vllm-project/vllm/issues/44123) | ✅ Fixed — [#44207](https://github.com/vllm-project/vllm/pull/44207) |
 
 Two further candidates were investigated and closed **without a
-finding** — an existing guard already rejects the bad value cleanly
+finding**, an existing guard already rejects the bad value cleanly
 before it can do damage: `--block-size N` non-power-of-2 (AUDIT.md
 Finding #7) and `--kv-cache-memory-bytes <negative>` (AUDIT.md
 Finding #9, caught by `_check_enough_kv_cache_memory`). Three ESBMC
