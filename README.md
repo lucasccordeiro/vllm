@@ -20,9 +20,13 @@ failures.
 [`AUDIT.md`](./AUDIT.md)): three fixed upstream by PR #43794
 (`--block-size 0`, `--hash-block-size 0`, `--max-model-len 0`), a
 fourth (`--hash-block-size -k`) incidentally closed by the same
-`gt=0` constraint, one filed and open
+`gt=0` constraint, one **still open**
 ([#43842](https://github.com/vllm-project/vllm/issues/43842)
-`--num-gpu-blocks-override 0`), and the two silent-acceptance defects
+`--num-gpu-blocks-override 0` — unfixed on upstream `main` as of
+2026-08-27, auto-labelled `stale`, with two unreviewed community PRs
+[#44233](https://github.com/vllm-project/vllm/pull/44233) /
+[#44241](https://github.com/vllm-project/vllm/pull/44241) proposing the
+`gt=0` fix), and the two silent-acceptance defects
 `--max-logprobs`/`--long-prefill-token-threshold` negatives (bundled in
 [#43985](https://github.com/vllm-project/vllm/issues/43985)) **fixed
 upstream** by [#44070](https://github.com/vllm-project/vllm/pull/44070)
@@ -41,6 +45,12 @@ Three ESBMC frontend issues were filed along the way
 ([#4926](https://github.com/esbmc/esbmc/issues/4926),
 [#4909](https://github.com/esbmc/esbmc/issues/4909),
 [#4756](https://github.com/esbmc/esbmc/issues/4756)).
+
+Upstream status re-checked 2026-08-27 against `vllm-project/vllm @
+4a6a3272`: five of the six filed vLLM issues are fixed and closed, each
+fix re-read in upstream source rather than inferred from the issue
+state; only #43842 remains. Per-issue table in [`AUDIT.md`](./AUDIT.md)
+*Upstream status*.
 
 **Worked example — `--block-size 0`
 ([#43496](https://github.com/vllm-project/vllm/issues/43496)).**
