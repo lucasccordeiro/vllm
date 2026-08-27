@@ -1,10 +1,10 @@
 # vLLM ESBMC-Python verification PoC
 
-A proof-of-concept applying [ESBMC](https://github.com/esbmc/esbmc) —
+A proof-of-concept applying [ESBMC](https://github.com/esbmc/esbmc),
 a bounded model checker that either proves no input up to a given
-bound violates a property, or returns a concrete counterexample — to
+bound violates a property, or returns a concrete counterexample, to
 [vLLM](https://github.com/vllm-project/vllm)'s config-validation chain
-and KV-cache integer arithmetic. Modelled on the
+and KV-cache integer arithmetic. Modeled on the
 [AWS-Neuron PoC](https://github.com/lucasccordeiro/AWS-Neuron).
 
 **Why it matters if you run vLLM in production:** a malformed CLI
@@ -64,7 +64,7 @@ crash. The fix that landed
 `SkipValidation[int]` with the one-line `Field(default=None, gt=0)`
 shape proposed in the issue — [#43496](https://github.com/vllm-project/vllm/issues/43496).
 The harness is kept as a regression witness: re-run against
-post-#43794 source, it now exercises the validator instead of the
+post-#43794 source; it now exercises the validator instead of the
 crash site. See [`REPORT.md` §7](./REPORT.md).
 
 **First latent-precondition finding (defensive, not a live bug).**
