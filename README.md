@@ -11,7 +11,7 @@ and KV-cache integer arithmetic. Modeled on the
 flag (`--block-size 0`, a negative `--max-logprobs`, …) can pass
 argparse and every config validator, then surface much later as a
 bare `AssertionError`, a `ZeroDivisionError`, or a flag that silently
-does nothing — usually at engine init, on the machine that's supposed
+does nothing, usually at engine init, on the machine that's supposed
 to be serving traffic. Instead of testing individual flag values,
 ESBMC symbolically covers every value a field can take across the
 CLI-to-arithmetic call chain and produces a witness the moment one
